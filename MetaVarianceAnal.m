@@ -1,8 +1,18 @@
-save([r.Dir.Expt 'Analysis\Meta_10Trial_Responses_DB\exptsForICanal.mat'],...
-    'exptnames','readyexpt','sigdata','vardata','basewin','repexpts','addstimcond')
 %%
-load([r.Dir.Expt 'Analysis\Meta_10Trial_Responses_DB\exptsForICanal.mat'],...
-    'exptnames','readyexpt','sigdata','vardata','basewin','repexpts','addstimcond')
+r=rigdef('mac')
+%%
+
+
+save([r.Dir.Expt 'Analysis/Meta_10Trial_Responses_DB/exptsForICanal.mat'],...
+    'exptnames','readyexpt','sigdata','vardata','basewin','allstims','repexpts',...
+    'addstimcond','vmresp','base_vmresp','base_spkresp','spkresp','respDB',...
+    'respdata','cb','cr','respslope','baseslope')
+
+%%
+load([r.Dir.Expt 'Analysis/Meta_10Trial_Responses_DB/exptsForICanal.mat'],...
+    'exptnames','readyexpt','sigdata','vardata','basewin','allstims','repexpts',...
+    'addstimcond','vmresp','base_vmresp','base_spkresp','spkresp','respDB',...
+    'respdata','cb','cr','respslope','baseslope')
 %%
 d=dir(r.Dir.Expt);
 exptnames=[];
@@ -19,13 +29,12 @@ end
 addstimcond=[];
 addind=1;
 %%
-sigdata=[];
-vardata=[];
-basewin=[];
-onoff=[];
-percsignif=[];
-allstims=[];
-trials=10;
+sigdata = [];
+vardata = [];
+basewin = [];
+allstims = [];
+repexpts = [];
+trials=8;
 exptind=1;
 %%
 for iexpt=1:size(readyexpt,1)
@@ -95,15 +104,40 @@ for iexpt=1:size(readyexpt,1)
             
             vmexpt=filtesweeps(expt,0,'Vm',useVm);
             
-%             [s,v,b] = GetVarDistrib(vmexpt,stimcond,r);
-%             sigdata{exptind}=s;
-%             vardata{exptind}=v;
-%             basewin{exptind}=b;
-            %             onoff{exptind}=o;
-            %             percsignif{exptind}=p;
-            %             kst{exptind}=d;
-            allstims{exptind}=stimcond;
-%             repexpts{exptind}=thisexpt;
+            %check the waveonset_time and baselinewin
+            %add .check to expt.analysis.params if it is checked
+            checked_params = isfield(expt.analysis.params,'checked');
+            if ~checked_params
+                basetimes=vmexpt.analysis.params.baselinewin;
+                s=PlotAndAsk(vmexpt.wc.data(:,basetimes(1):basetimes(2)),'basebegin')
+                cellfun(@eval,s);
+                if ~isempty(basebegin)
+                    expt.params.baselinewin(1)=basetimes(1)+basebegin;
+                end
+                hfig = figure;
+                hold on
+                hl = line([1:size(expt.wc.data,2)]*expt.wc.dt,vmexpt.wc.data');
+                [sigon,sigoff]=GetSigTimes(vmexpt,stimcond,1);
+                
+                SigTimeBox(gca, sigon*expt.wc.dt, sigoff*expt.wc.dt, get(gca,'YLim'),'k')
+                onset_correct = input('sigonset correct?');  % 1:true, 0:false
+                if ~onset_correct
+                    onset = input('what is it instead?'); % in second...
+                    %(because will be either 1.3 or 1.8... haven't done any
+                    %other times in my time here)
+                    expt.analysis.params.waveonset_time = onset/expt.wc.dt;
+                end
+                expt.analysis.params.checked = [1];
+                save(fullfile(r.Dir.Expt,expt.name),'expt')
+                
+            end
+            
+            [s,v] = GetVarDistrib(vmexpt,stimcond);
+            sigdata{exptind} = s;
+            vardata{exptind} = v;
+            allstims{exptind} = stimcond;
+            repexpts{exptind} = thisexpt;
+            basewin{exptind} = expt.analysis.params.baselinewin;
             exptind=exptind+1;
             
         end
@@ -111,8 +145,7 @@ for iexpt=1:size(readyexpt,1)
             usedexpt(iexpt)=0;
             continue
         end
-        
-        
+
     end
     if isclamp==0
         usedexpt(iexpt)=0;
@@ -123,11 +156,13 @@ for iexpt=1:size(readyexpt,1)
     
     
 end
-%%
+%% did this to get ready expt... but now readyexpt is saved.
+%all the rest of the expts need to have stimcond added, etc to be able to
+%be filtered and used with this workflow
 reind=find(usedexpt);
 readyexpt=exptnames(reind)
 
-%%
+%% getting Rs and Rin to find 
 for iexpt=1:length(readyexpt)
     thisexpt=readyexpt{iexpt};
     %load in expt
@@ -160,54 +195,54 @@ for iexpt=1:length(readyexpt)
 end
 
 %%
-
-%take note of which stimuli are DB stimuli so can sort out that data
-isdb=[];
-thisdb=[];
-for istimcond=1:size(allstims,2)
-    thiscond=allstims{istimcond};
-    for istim=1:size(thiscond,2)
-        thisstim=thiscond(istim).wavnames;
-        dind=regexp(thisstim,'d');
-        if ~isempty(dind)
-            isdb{istimcond}(istim)=1;
-            thisdb{istimcond}(istim)=str2num(thisstim(1,end-1:end));
-        end
-        if isempty(dind)
-            isdb{istimcond}(istim)=0;
-        end
-    end
-end
-
-dbsigdata=[];
-dbvardata=[];
-dbon=[];
-dboff=[];
-dbpercsig=[];
-percbase=[];
-dballstims=[];
-
-dbins=[25:20:85];
-%for each of the cells, separate data for each of the db categories
-for idb=1:size(dbins,2)-1
-    needcross=idb;
-    stimind=1;
-    for istimcond=1:size(allstims,2)
-        celldb=thisdb{istimcond};
-        for istim=1:size(celldb,2)
-            if crossing(dbins,[],celldb(istim))==needcross
-                dbon (idb,stimind)= onoff{istimcond}(istim,1);
-                dboff(idb,stimind) = onoff{istimcond}(istim,2);
-                dbpercbase(idb,stimind)=percsignif{istimcond}(istim,1);
-                dbpercsig(idb,stimind)=percsignif{istimcond}(istim,2);
-                dbvardata{idb,stimind}=vardata{istimcond}(istim,:);
-                dbsigdata{idb,stimind}=sigdata{istimcond}(istim,:);
-                stimind=stimind+1;
-            end
-        end
-    end
-    oldind(idb)=stimind;
-end
+% 
+% %take note of which stimuli are DB stimuli so can sort out that data
+% isdb=[];
+% thisdb=[];
+% for istimcond=1:size(allstims,2)
+%     thiscond=allstims{istimcond};
+%     for istim=1:size(thiscond,2)
+%         thisstim=thiscond(istim).wavnames;
+%         dind=regexp(thisstim,'d');
+%         if ~isempty(dind)
+%             isdb{istimcond}(istim)=1;
+%             thisdb{istimcond}(istim)=str2num(thisstim(1,end-1:end));
+%         end
+%         if isempty(dind)
+%             isdb{istimcond}(istim)=0;
+%         end
+%     end
+% end
+% 
+% dbsigdata=[];
+% dbvardata=[];
+% dbon=[];
+% dboff=[];
+% dbpercsig=[];
+% percbase=[];
+% dballstims=[];
+% 
+% dbins=[25:20:85];
+% %for each of the cells, separate data for each of the db categories
+% for idb=1:size(dbins,2)-1
+%     needcross=idb;
+%     stimind=1;
+%     for istimcond=1:size(allstims,2)
+%         celldb=thisdb{istimcond};
+%         for istim=1:size(celldb,2)
+%             if crossing(dbins,[],celldb(istim))==needcross
+%                 dbon (idb,stimind)= onoff{istimcond}(istim,1);
+%                 dboff(idb,stimind) = onoff{istimcond}(istim,2);
+%                 dbpercbase(idb,stimind)=percsignif{istimcond}(istim,1);
+%                 dbpercsig(idb,stimind)=percsignif{istimcond}(istim,2);
+%                 dbvardata{idb,stimind}=vardata{istimcond}(istim,:);
+%                 dbsigdata{idb,stimind}=sigdata{istimcond}(istim,:);
+%                 stimind=stimind+1;
+%             end
+%         end
+%     end
+%     oldind(idb)=stimind;
+% end
 
 
 %%
@@ -220,9 +255,6 @@ stimind=1;
 for istimcond=1:size(allstims,2)
     thiscond=allstims{istimcond};
     [sigon,sigoff]=GetSigTimes(expt,thiscond,1);
-    sigtimediff=(1.8/expt.wc.dt)-sigon;
-    sigon = sigon + sigtimediff;
-    sigoff = sigoff + sigtimediff;
     
     for istim=1:size(thiscond,2)
         thisstim=thiscond(istim).wavnames;
@@ -245,7 +277,8 @@ for istimcond=1:size(allstims,2)
 end
 
 
-%%
+%% this section is to get the variance in windows... 
+% but it uses the arcane routine to get response windows from sigdata
 sigind=1;
 percresp=[];
 percnot=[];
@@ -553,21 +586,27 @@ title([num2str(db(idb)) ' dB SPL']);
 end
 
 %%
-figure;
+%before this will work... I need to put in some lines for normalizing each
+%record to (the mean of baseline?) or to (the Vrest of baseline?... 
+    %probably the later to show it is zero)
+%plot baseline period in subplot to the left for each as well (from stimonset = 0) to compare
+varfig = figure;
 hold on
-tmp=[];
-ontime=[];
-offtime=[];
+sigfig = figure;
+hold on
 tmp=[];
 for ivar=1:size(allvardata,2)
     sigoff=allsigwin{ivar}(2);
-    offtime(ivar)=sigoff*expt.wc.dt;
-    ontime(ivar)=allsigwin{ivar}(1)*expt.wc.dt;
-    recover=round(0.07/expt.wc.dt);
-    tmp(ivar,:)=allvardata{ivar}(1,sigoff:sigoff+recover);
-    line([1:size(tmp,2)]*expt.wc.dt,tmp(ivar,:)) 
+    recover=round(0.7/expt.wc.dt);
+    tmpvar(ivar,:)=allvardata{ivar}(1,sigoff:sigoff+recover);
+    figure(varfig)
+    line([1:size(tmpvar(ivar,:),2)]*expt.wc.dt,tmpvar(ivar,:)) 
+     tmpsig(ivar,:)=allsigdata{ivar}(1,sigoff:sigoff+recover);
+    figure(sigfig)
+       line([1:size(tmpsig(ivar,:),2)]*expt.wc.dt,tmpsig(ivar,:)) 
 end
- plot(nanmean(tmp)')
+figure(sigfig)
+ plot(nanmean(tmpsig)')
 
 %%
 %to ask whether the neuron is in up/down states during baseline
@@ -575,9 +614,9 @@ end
 %get distribution of Vm for each cell across all stimuli for that cell
 ...test for binary (or poisson) distribution (whatever they use for spike widths)
     
-for iexpt=1:size(allexptnames,2)
+for iexpt=1:size(repexpts,2)
     thisstim=allsignames{iexpt};
-    thisexpt=allexptnames{iexpt};
+    thisexpt=repexpts{iexpt};
     load([r.Dir.Expt thisexpt])
     
     vmexpt=filtesweeps(expt,0,'Vm',0); %filter expt for 0 mV assuming
@@ -608,6 +647,8 @@ line(edges, nresp,'color','r')
 
 end
 %%
+
+%% variables to clear for next section
 trials = 8; %this way i can get the 80db stim from that one cell...
 vmresp=[];
 base_vmresp=[];
@@ -619,6 +660,7 @@ cb=[];
 cr=[];
 respslope=[];
 baseslope=[];
+%%
 stimind=1;
 respind=1;
 hfig_vm = figure;
@@ -626,7 +668,10 @@ hold all
 hfig_spk = figure;
 hold all
 
-for iexpt=1:size(repexpts,1)
+use_dbinds = 0;
+PlotResponseGrid = 0;
+
+for iexpt=1:size(repexpts,2)
     iexpt
     thisexpt=repexpts{iexpt};
     load([r.Dir.Expt thisexpt])
@@ -647,12 +692,9 @@ for iexpt=1:size(repexpts,1)
     allsig=table.sigsplayed;
     stimcond=getsubstimcond(expt.stimcond,table.sigsplayed(keepsigs));
     repsigs=allsig(keepsigs);
-    basetimes=     basewin{iexpt};
+    basetimes=basewin{iexpt};
  
     [sigon,sigoff]=GetSigTimes(expt,expt.stimcond,1);
-    sigtimediff=(1.8/expt.wc.dt)-sigon;
-    sigon = sigon + sigtimediff;
-    sigoff = sigoff + sigtimediff;
     
     [dbstimcond,dblevels]=getDBstimcond(vmexpt);
     if isempty(dbstimcond)
@@ -698,6 +740,7 @@ for iexpt=1:size(repexpts,1)
         windowsize = 500;
         binsize = 10;
         p = 0.85;
+       
         %get the response and inhibited data off confint
         for idb=1:size(thisdb,2)
             sigexpt=filtesweeps(vmexpt,0,'wavnames',thiscond(idb).wavnames);
@@ -751,7 +794,7 @@ for iexpt=1:size(repexpts,1)
             low_win = getWindowEdges (low_inds, 1, 1)+sigon;
         end
         
-        if plotresponseGrid ==1
+        if PlotResponseGrid ==1
             %plot the data and the windows
             respfig = figure;
             hold on
@@ -803,9 +846,9 @@ for iexpt=1:size(repexpts,1)
             title(['CELL: ' expt.name '   SIGNAL: ' thiscond(istimcond).wavnames(1:end-3)], 'Interpreter','none')
             set(respfig,'Position',[   252   531   957   404]);
             
-            saveas(respfig,[r.Dir.Expt 'Analysis\Meta_10Trial_Responses_DB\' expt.name '_'...
+            saveas(respfig,[r.Dir.Expt 'Analysis/Meta_10Trial_Responses_DB/' expt.name '_'...
                 num2str(istimcond) '_Responses_Windows.fig']);
-            saveas(respfig,[r.Dir.Expt 'Analysis\Meta_10Trial_Responses_DB\' expt.name '_'...
+            saveas(respfig,[r.Dir.Expt 'Analysis/Meta_10Trial_Responses_DB/' expt.name '_'...
                 num2str(istimcond) '_Responses_Windows.png']);
         end
         % need to get spiking responses that intersect with Vm responses...
@@ -864,6 +907,7 @@ for iexpt=1:size(repexpts,1)
     
 end
 %%
+
 mined=min([baseslope,respslope]);
 maxed=max([baseslope,respslope]);
 edges=[mined:(maxed-mined)/20:maxed];
@@ -914,8 +958,8 @@ for imdb=1:size(dblist,2)
     end
 end
 allbase=[];
-for ibase=1:size(normbase,2)
-  allbase=[allbase,normbase{ibase}];  
+for ibase=1:size(base_vmresp,2)
+  allbase=[allbase,base_vmresp{ibase}];  
 end
 
 figure;
