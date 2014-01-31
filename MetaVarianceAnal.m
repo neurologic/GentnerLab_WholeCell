@@ -1,161 +1,4 @@
-%%
-r=rigdef('mac')
-%%
 
-
-save([r.Dir.Expt 'Analysis/Meta_10Trial_Responses_DB/exptsForICanal.mat'],...
-    'exptnames','readyexpt','sigdata','vardata','basewin','allstims','repexpts',...
-    'addstimcond','vmresp','base_vmresp','base_spkresp','spkresp','respDB',...
-    'respdata','cb','cr','respslope','baseslope')
-
-%%
-load([r.Dir.Expt 'Analysis/Meta_10Trial_Responses_DB/exptsForICanal.mat'],...
-    'exptnames','readyexpt','sigdata','vardata','basewin','allstims','repexpts',...
-    'addstimcond','vmresp','base_vmresp','base_spkresp','spkresp','respDB',...
-    'respdata','cb','cr','respslope','baseslope')
-%%
-d=dir(r.Dir.Expt);
-exptnames=[];
-exptind=1;
-for id=1:length(d)
-    thisname=d(id).name;
-    if ~isempty(regexp(d(id).name,'.mat'))
-        if ~isempty(regexp(d(id).name,'KP'))
-            exptnames{exptind}=d(id).name;
-            exptind=exptind+1;
-        end
-    end
-end
-addstimcond=[];
-addind=1;
-%%
-sigdata = [];
-vardata = [];
-basewin = [];
-allstims = [];
-repexpts = [];
-trials=8;
-exptind=1;
-%%
-for iexpt=1:size(readyexpt,1)
-    
-    thisexpt=readyexpt{iexpt};
-    %load in expt
-    load([r.Dir.Expt thisexpt])
-    
-    %check that the expt has a folder
-    isfold=exist([r.Dir.Expt expt.name], 'dir');
-    if isfold~=7
-        %make the folder if it didn't exist
-        mkdir(r.Dir.Expt,expt.name);
-    end
-    
-    %check if this expt has a stimcond field
-    hasstim=isfield(expt,'stimcond');
-    if ~hasstim
-        %enter this expt in a list to go through later and add stimcond
-        %skips this expt for now
-        addstimcond{addind}=expt.name;
-        addind=addind+1;
-        continue
-    end
-    
-    %find if this expt has a table
-    hastable=isfield(expt,'table');
-    if ~hastable
-        %query experiment if it does not have a table yet
-        [expt,table,hfig]=QueryExpt(expt);
-    end
-    
-    %find if this expt had IC trials
-    %find if this expt had IC trials
-    [isclamp,icID]=findclamp(expt,'ic');
-    if isclamp==1
-        %if there is more than one IC trial, pick the 0 holding current
-        if size(icID,2)>1
-            useVm=[];
-            clamps=[];
-            for iclamp=1:size(icID,2)
-                clamps(iclamp)=expt.table(icID(iclamp)).clamp;
-            end
-            if ~isempty(find(clamps==0))
-                useVm=0;
-            end
-            %if no zero holding current, use the next most negative
-            if isempty(find(clamps==0))
-                clamps=sort(clamps);
-                [s,t]=crossing(clamps);
-                useVm=clamps(s);
-            end
-        end
-        if size(icID,2)==1
-            %if only one holding current use that one
-            useVm=expt.table(icID).clamp;
-        end
-        
-        %mark this expt as "used" for this analysis
-        
-        table=getClampTab(expt,{'clamp',useVm});
-        keepsigs=reprequire(table,trials);
-        stimcond=getsubstimcond(expt.stimcond,table.sigsplayed(keepsigs));
-        
-        if ~isempty(stimcond)
-            usedexpt(iexpt)=1;
-            
-            vmexpt=filtesweeps(expt,0,'Vm',useVm);
-            
-            %check the waveonset_time and baselinewin
-            %add .check to expt.analysis.params if it is checked
-            checked_params = isfield(expt.analysis.params,'checked');
-            if ~checked_params
-                basetimes=vmexpt.analysis.params.baselinewin;
-                s=PlotAndAsk(vmexpt.wc.data(:,basetimes(1):basetimes(2)),'basebegin')
-                cellfun(@eval,s);
-                if ~isempty(basebegin)
-                    expt.params.baselinewin(1)=basetimes(1)+basebegin;
-                end
-                hfig = figure;
-                hold on
-                hl = line([1:size(expt.wc.data,2)]*expt.wc.dt,vmexpt.wc.data');
-                [sigon,sigoff]=GetSigTimes(vmexpt,stimcond,1);
-                
-                SigTimeBox(gca, sigon*expt.wc.dt, sigoff*expt.wc.dt, get(gca,'YLim'),'k')
-                onset_correct = input('sigonset correct?');  % 1:true, 0:false
-                if ~onset_correct
-                    onset = input('what is it instead?'); % in second...
-                    %(because will be either 1.3 or 1.8... haven't done any
-                    %other times in my time here)
-                    expt.analysis.params.waveonset_time = onset/expt.wc.dt;
-                end
-                expt.analysis.params.checked = [1];
-                save(fullfile(r.Dir.Expt,expt.name),'expt')
-                
-            end
-            
-            [s,v] = GetVarDistrib(vmexpt,stimcond);
-            sigdata{exptind} = s;
-            vardata{exptind} = v;
-            allstims{exptind} = stimcond;
-            repexpts{exptind} = thisexpt;
-            basewin{exptind} = expt.analysis.params.baselinewin;
-            exptind=exptind+1;
-            
-        end
-        if isempty(stimcond)
-            usedexpt(iexpt)=0;
-            continue
-        end
-
-    end
-    if isclamp==0
-        usedexpt(iexpt)=0;
-    end
-    
-    %mark this expt as "used" for this analysis
-    
-    
-    
-end
 %% did this to get ready expt... but now readyexpt is saved.
 %all the rest of the expts need to have stimcond added, etc to be able to
 %be filtered and used with this workflow
@@ -679,7 +522,7 @@ for iexpt=1:size(repexpts,2)
     vmexpt=filtesweeps(expt,0,'Vm',0); %filter expt for 0 mV assuming
     ...this is the potential all ic data recorded at in this set
         table=getClampTab(expt,{'clamp',0});
-    highpassdata=HighpassGeneral(vmexpt.wc.data,[],100,1/expt.wc.dt);
+    highpassdata=HighpassGeneral(vmexpt.wc.data,[],1/expt.wc.dt);
     
     %     outcell=PlotAndAsk(highpassdata,'spikesthresh','negative');
     %     cellfun(@eval,outcell);
@@ -752,7 +595,7 @@ for iexpt=1:size(repexpts,2)
             [upinds{idb}, lowinds{idb}] = WindowResponse(sdata(idb,sigon:sigoff), confint(idb,:), windowsize, binsize, p);
             
             fs=1/expt.wc.dt;
-            highpassdata=HighpassGeneral(sigexpt.wc.data,[],metadata.highcutoff,fs);
+            highpassdata=HighpassGeneral(sigexpt.wc.data,[],fs);
             if negative==1
                 highpassdata=-highpassdata;
             end
@@ -794,6 +637,27 @@ for iexpt=1:size(repexpts,2)
             low_win = getWindowEdges (low_inds, 1, 1)+sigon;
         end
         
+ %%%%%%%%%%%%%% for each of the responses, get the average value and the spiking response       
+ for idb=1:size(thisdb,2)
+     line(xtime(1,basetimes(1):end),sdata(idb,basetimes(1):end),'color',grad(idb,:),'LineWidth',3);
+     %             plot([xtime(1),xtime(end)],[confint(idb,2),confint(2)],'--','color','k')
+    for iresp=1:size(up_win,2)
+                SigTimeBox(gca, up_win(1,iresp)*expt.wc.dt, ...
+                    up_win(2,iresp)*expt.wc.dt, get(gca,'YLim'),'r');
+     end
+     
+     for iresp = 1:size(up_win(1))
+        response_vm = sdata(idb,up_win(1,iresp));
+         for itrial=1:nreps(idb)
+             for ispike=1:size(spiketimes{idb,itrial},2)
+                 %match spikes to response windows
+             end
+         end
+     end
+     
+ end
+            
+ %%%%%%%%%%%%%%%%%%%%%%%%%%%
         if PlotResponseGrid ==1
             %plot the data and the windows
             respfig = figure;
@@ -834,7 +698,7 @@ for iexpt=1:size(repexpts,2)
                 'color',[1,1,1]);
             box off
             SigTimeBox(gca, sigon*expt.wc.dt,sigoff*expt.wc.dt, get(gca,'YLim'),[0.5 0.5 0.5]);
-            SigTimeBox(gca, xtime(1),xtime(end), [mean(confint(:,1)),  mean(confint(:,2))],'k');
+            SigTimeBox(gca, xtime(1),xtime(end), [mean(confint(:,1)),  mean(confint(:,2))],[0.9 0.9 0.9]);
             for iresp=1:size(up_win,2)
                 SigTimeBox(gca, up_win(1,iresp)*expt.wc.dt, ...
                     up_win(2,iresp)*expt.wc.dt, get(gca,'YLim'),'r');
