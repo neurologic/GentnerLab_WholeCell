@@ -366,7 +366,6 @@ for iunq = 5:size(unq_expts,2)
     end
 end
 %need a standard for spike height, overshoot, and variance of height
-%can filter some based on Rs because i know that causes lowpass filtering
 %i can only use cells that don't pass for measure of variance in Vm
 
 

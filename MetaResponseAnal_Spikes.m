@@ -1,109 +1,105 @@
-function MetaResponseAnal_Spikes(expt,input_struct)
+function [out_struct, hfig] = MetaResponseAnal_Spikes(input_struct)
+%feed in only the highpass data you want spikes from
+%don't deal with parsing baseline versus stimulus spikes in here
 
 allfields = fieldnames(input_struct);
 for ifield = 1:size(allfields,1)
-   s = [allfields{ifield} ' = input_struct.' allfields{ifield} ';'];
-   eval(s)
+    s = [allfields{ifield} ' = input_struct.' allfields{ifield} ';'];
+    eval(s)
 end
 
-highpassdata=HighpassGeneral(sigdata,[],1/expt.wc.dt);
-[spikesmat, gausstosmooth]=getspikesmat(highpassdata,spk_thresh,expt);
+[spikesmat, gausstosmooth]=getspikesmat(highpassdata,spk_thresh,dt);
 spiketimes = [];
 for itrial=1:size(spikesmat,1)
     spiketimes{itrial}=find(spikesmat(itrial,:));
 end
 
-spkwin_size = round((0.05/expt.wc.dt)/2);
-basespk_ind = 1;
-stimspk_ind = 1;
-base_spk_vm{stimind} = [];
-stim_spk_vm{stimind} = [];
-
+spkwin_size = round((0.05/dt)/2);
+vm_win = [0.005, 0.002]; %this is 3 milliseconds a little before the spike;
+out_struct.spk_shape = [];
+out_struct.spk_vm = [];
+out_struct.spk_thrsh = [];
+spk_ind = 1;
 for itrial=1:size(spikesmat,1)
     spks_trial = spiketimes{itrial};
     for ispike = 1:size(spks_trial,2)
         t1 = spks_trial(ispike);
-        %if the spike is during baseline
-        if t1 > basetimes(1) && t1 < sigon
-            spk_win = [(t1 - spkwin_size),(t1 + spkwin_size)];
-            base_spk_vm{stimind}(basespk_ind,:) = sigdata(itrial,spk_win(1):spk_win(2));
-            %get peak in this window and re-center based on real spike
-            %peak
-            spk_peak = find(base_spk_vm{stimind}(basespk_ind,:) == max(base_spk_vm{stimind}(basespk_ind,:)))+spk_win(1);
-            spk_win = [(spk_peak - spkwin_size),(spk_peak + spkwin_size)];
-            base_spk_vm{stimind}(basespk_ind,:) = sigdata(itrial,spk_win(1):spk_win(2));
-            basespk_ind = basespk_ind +1;
+        spk_wintight = [t1-20,t1+20];
+        spk_win = [(t1 - spkwin_size),(t1 + spkwin_size)];
+%         pad_begin = [];
+%         pad_end = [];
+        if spk_win(1) < 0 || spk_win(2) > size(sigdata,2)
+            continue
+%             pad_begin = NaN(1,0 - spk_win(1)+1);
+%             spk_win(1) = 1;
+%         end
+%         if spk_win(2) > size(sigdata,2)
+%             pad_end = NaN(1, spk_win(2) - size(sigdata,2) );
+%             spk_win(2) = size(sigdata,2);
         end
-        %if the spike is during the stimulus (try + 200msec?
-        % given what i know about the long-lasting recovery and offset resp?...
-        if t1 > sigon && t1 < sigoff
-            spk_win = [(t1 - spkwin_size),(t1 + spkwin_size)];
-            stim_spk_vm{stimind}(stimspk_ind,:) = sigdata(itrial,spk_win(1):spk_win(2));
-            %get peak in this window and re-center based on real spike
-            %peak
-            spk_peak = min(find(stim_spk_vm{stimind}(stimspk_ind,:) == max(stim_spk_vm{stimind}(stimspk_ind,:)))+spk_win(1));
-            spk_win = [(spk_peak - spkwin_size),(spk_peak + spkwin_size)];
-            stim_spk_vm{stimind}(stimspk_ind,:) = sigdata(itrial,spk_win(1):spk_win(2));
-            stimspk_ind = stimspk_ind +1;
+        tmpshape = sigdata(itrial,spk_win(1):spk_win(2)); 
+%         out_struct.spk_shape(spk_ind,:) = [pad_begin, ...
+%             sigdata(itrial,spk_win(1):spk_win(2)), pad_end];
+        %get peak in this window and re-center based on real spike peak
+        spk_peak(spk_ind) = min(find(tmpshape == ...
+            max(sigdata(itrial,spk_wintight(1):spk_wintight(2))))+spk_win(1));
+        spk_win = [(spk_peak(spk_ind) - spkwin_size),(spk_peak(spk_ind) + spkwin_size)];
+        spk_wintight = [spk_peak(spk_ind)-15,spk_peak(spk_ind)+15] - spk_win(1);
+       
+        if spk_win(1) < 0 || spk_win(2) > size(sigdata,2)
+           continue
         end
+        out_struct.spk_win(spk_ind,:) = spk_win;
+        out_struct.spk_shape(spk_ind,:) = ...
+            sigdata(itrial,spk_win(1):spk_win(2));
+%         shift_x = find(out_struct.spk_shape(spk_ind,:)==max(out_struct.spk_shape(spk_ind,:)));
+        
+        dV_win = round(276 - (vm_win/dt)) + spk_win(1);
+        out_struct.spk_vm(spk_ind) = mean(mean(sigdata(itrial, dV_win(1):dV_win(2)),1));
+        dV = sigdata(itrial, dV_win(2)) - sigdata(itrial, dV_win(1));
+        out_struct.spk_dv(spk_ind) = dV / (diff(dV_win)*dt);
+        
+        %get threshold automatically using peak and dv/dt
+        dvdt = diff(out_struct.spk_shape(spk_ind,:));
+        dvdt_max = max(dvdt(1,spk_wintight(1):spk_wintight(2)));
+        peakind = find(dvdt == dvdt_max) ;
+%         spk_peak(spk_ind) - spk_win(1);
+%         dvdt_thr = 0.033 * dvdt_max;
+        dvdt_thr = 0.1 * dvdt_max;
+        for isamp = 1:20
+            if dvdt(1,peakind - isamp) < dvdt_thr
+               out_struct.spk_thrsh(spk_ind) = out_struct.spk_shape(spk_ind, (peakind - isamp + 1));
+                break
+            end
+        end 
+        spk_ind = spk_ind +1;
+        
     end
 end
 
-if plotSpikeShape == 1;
-    [colvec colsize rowvec rowsize] = subplotinds(1,2);
-    hfig = [];
-    % plot baseline spikes
-    if ~isempty(base_spk_vm{stimind})
-        shift_x = find(mean(base_spk_vm{stimind})==max(mean(base_spk_vm{stimind})));
-        xtime = ([1:size(base_spk_vm{stimind},2)]-shift_x)*expt.wc.dt;
-        hfig(1) = figure;
-        hold on
-        hs1 = subplot('Position',[colvec(1),rowvec(1),colsize,rowsize]);
-        line(xtime,base_spk_vm{stimind}')
-        axis tight
-        title(['expt.name : stimulus #' num2str(istimcond)...
-            '    # baseline spikes = ' num2str(size(base_spk_vm{stimind},1))])
-        hs2 = subplot('Position',[colvec(2),rowvec(2),colsize,rowsize]);
-        line(xtime,mean(base_spk_vm{stimind})')
-        axis tight
-        text(-.02,0,['expt.name : stimulus #' num2str(istimcond)...
-            '    # baseline spkies = ' num2str(size(base_spk_vm{stimind},1))])
-        set(hfig(1),'Position',[440   134   665   664]);
-        saveas(hfig(1),[r.Dir.Expt 'Analysis/Meta_10Trial_Responses_DB/SpikeShapes/' ...
-            expt.name '_allBaseSpk.png'])
-        saveas(hfig(1),[r.Dir.Expt 'Analysis/Meta_10Trial_Responses_DB/SpikeShapes/' ...
-            expt.name '_allBaseSpk.fig'])
-        base_spk_mean(stimind,:) = mean(base_spk_vm{stimind});
-        spk_thresh(stimind,1) = input('spike threshold?');
-    end
-    
-    %plot stimulus spikes
-    if ~isempty(stim_spk_vm{stimind})
-        shift_x = find(mean(stim_spk_vm{stimind})==max(mean(stim_spk_vm{stimind})));
-        xtime = ([1:size(stim_spk_vm{stimind},2)]-shift_x)*expt.wc.dt;
-        hfig(2) = figure;
-        hold on
-        hs1 = subplot('Position',[colvec(1),rowvec(1),colsize,rowsize]);
-        line(xtime,stim_spk_vm{stimind}')
-        axis tight
-        title(['expt.name : stimulus #' num2str(istimcond)...
-            '    # stim spkies = ' num2str(size(stim_spk_vm{stimind},1))])
-        hs2 = subplot('Position',[colvec(2),rowvec(2),colsize,rowsize]);
-        line(xtime,mean(stim_spk_vm{stimind})')
-        axis tight
-        set(hfig(2),'Position',[440   134   665   664]);
-        saveas(hfig(2),[r.Dir.Expt 'Analysis/Meta_10Trial_Responses_DB/SpikeShapes/' ...
-            expt.name '_allStimSpk.png'])
-        saveas(hfig(2),[r.Dir.Expt 'Analysis/Meta_10Trial_Responses_DB/SpikeShapes/' ...
-            expt.name '_allStimSpk.fig'])
-        stim_spk_mean(stimind,:) = mean(stim_spk_vm{stimind});
-        spk_thresh(stimind,2) = input('spike thresh ?');
-    end
-end
-spk_bad(stimind) = input('spikes bad (0) or good (1)?');
-for ifig = 1:size(hfig,2)
-    if hfig(ifig)~=0
-        close(hfig(ifig))
-    end
-end
+
+[colvec colsize rowvec rowsize] = subplotinds(1,3);
 hfig = [];
+% plot spikes
+if ~isempty(out_struct.spk_shape)
+%     shift_x = find(mean(out_struct.spk_shape)==max(mean(out_struct.spk_shape)));
+    shift_x = unique(spk_peak' - out_struct.spk_win(:,1));
+    xtime = ([1:size(out_struct.spk_shape,2)]-shift_x)*dt;
+    hfig(1) = figure;
+    hold on
+    hs1 = subplot('Position',[colvec(1),rowvec(1),colsize,rowsize]);
+    line(xtime,out_struct.spk_shape')
+    axis tight
+    hs2 = subplot('Position',[colvec(2),rowvec(2),colsize,rowsize]);
+    line(xtime,nanmean(out_struct.spk_shape)')
+    axis tight
+    text(-0.02,-30,['# spikes = ' num2str(size(out_struct.spk_thrsh,2))])
+    hs3 = subplot('Position',[colvec(3),rowvec(3),colsize,rowsize]);
+    edges = [-80 : 2: -20];
+    nthrsh = histc(out_struct.spk_thrsh,edges);
+    bar(edges, nthrsh/size(out_struct.spk_thrsh,2),'k')
+    set(gca,'XLim',[-70,-20],'YLim',[0,1]);
+    text(-60,0.8,['mean threshold = ' num2str(mean(out_struct.spk_thrsh))])
+    set(hfig(1),'Position',[440   134   665   664]);
+end
+

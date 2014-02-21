@@ -1,4 +1,4 @@
-function [spikesmat, gausstosmooth]=getspikesmat(highpassdata,threshold,expt)
+function [spikesmat, gausstosmooth]=getspikesmat(highpassdata,threshold,dt)
 spikesmat=[];
 
 a=highpassdata>=threshold;
@@ -10,8 +10,8 @@ if isempty(spikesmat)
 end
 
 for itrial=1:size(spikesmat,1)
-    spiketimes{itrial}=find(spikesmat(itrial,:))*expt.wc.dt;
-    meanisi(itrial)=mean(diff(spiketimes{itrial}))/expt.wc.dt;
+    spiketimes{itrial}=find(spikesmat(itrial,:))*dt;
+    meanisi(itrial)=mean(diff(spiketimes{itrial}))/dt;
     
 end
 

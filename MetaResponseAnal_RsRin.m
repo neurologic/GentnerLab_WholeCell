@@ -1,23 +1,9 @@
-function [out_struct,hfig] = MetaResponseAnal_RsRin(expt,input_struct)
-allfields = fieldnames(input_struct);
-for ifield = 1:size(allfields,1)
-    s = [allfields{ifield} ' = input_struct.' allfields{ifield} ';'];
-    eval(s)
-end
+function [out_struct,hfig] = MetaResponseAnal_RsRin(allstepdata,expt)  
 
- 
 stepdur = round(0.25/expt.wc.dt);
- stepstart = 553;
-allstepdata = expt.wc.data(:,stepstart:stepdur)*1000;
-stepstd = std(allstepdata');
+stepstart = 553;
 
-approxDV = min(min(expt.wc.data(:,1:stepstart)))*1000 - min(min(allstepdata));
-%only use trials to calculate parameters that have standard deviation less
-%than half the approximated voltage drop during step (not too much spont
-%activity riding on step)
-keepinds = find(stepstd < approxDV/2);
-
-stepdata = mean(allstepdata(keepinds,:),1);
+stepdata = mean(allstepdata,1);
 stepdata=(stepdata- max(stepdata));
 rin_x = [0:size(stepdata,2)-1];
 
@@ -34,8 +20,14 @@ elseif isempty(find(diff(stepdata(1,1:10))>0))
     Artifact_ind = 1;
 end
 
-
-f=fit(xtimestep(1,Artifact_ind:100)',stepdata(1,Artifact_ind:100)','exp2');
+%need to implement fit options
+options = fitoptions('exp2');
+lowerTau = -1/expt.wc.dt;
+upperTau = -1/0.05;
+options.Lower = [0,lowerTau,0,lowerTau];
+options.Upper = [Inf,upperTau,Inf,upperTau];
+f=fit(xtimestep(1,Artifact_ind:100)',...
+    stepdata(1,Artifact_ind:100)','exp2',options);
 alltau= [f.b,f.d];
 alloff = [f.a,f.c];
 rs_t = min(alltau);
@@ -54,5 +46,36 @@ stepamp=-0.075;
 out_struct.Rin  = min(rin_fitline)/stepamp;
 out_struct.Rs = min(rs_fitline)/stepamp;
 rin_tau = -1/rin_t;  
+out_struct.TaoCell = rin_tau;
 out_struct.Cm = (rin_tau / round(out_struct.Rin*1000000))*1000000000000; %seconds / ohms
     % divide by 10^12 to return Capacitance in picoFarads
+
+%  %% to plot when fooling around with the data bit by bit   
+%     %%%%%%
+% 
+% figure;
+% scatter(Rs,Rin,50,'k','fill');
+% xlabel('Rs','FontSize',18),ylabel('Rin','FontSize',18)
+% cf = fit(Rs',Rin','poly1');
+% line(Rs, cf.p1.*Rs + cf.p2,'color','r')
+% ci = confint(cf);
+% title(['95% confidence interval on slope ('...
+%     num2str(cf.p1) ') = [' num2str(ci(:,1)') ']'],'FontSize',18)
+% 
+% figure;
+% scatter(Rs,Cm,50,'k','fill');
+% xlabel('Rs','FontSize',18),ylabel('Cm','FontSize',18)
+% cf = fit(Rs',Cm','poly1');
+% line(Rs, cf.p1.*Rs + cf.p2,'color','r')
+% ci = confint(cf);
+% title(['95% confidence interval on slope ('...
+%     num2str(cf.p1) ') = [' num2str(ci(:,1)') ']'],'FontSize',18)
+% 
+% figure;
+% scatter(Rin,Cm,50,'k','fill');
+% xlabel('Rin','FontSize',18),ylabel('Cm','FontSize',18)
+% cf = fit(Rin',Cm','poly1');
+% line(Rin, cf.p1.*Rin + cf.p2,'color','r')
+% ci = confint(cf);
+% title(['95% confidence interval on slope ('...
+%     num2str(cf.p1) ') = [' num2str(ci(:,1)') ']'],'FontSize',18)
