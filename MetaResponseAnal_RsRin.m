@@ -1,9 +1,10 @@
-function [out_struct,hfig] = MetaResponseAnal_RsRin(allstepdata,expt)  
-
+function [out_struct,hfig,hfig2,hfig3] = MetaResponseAnal_RsRin(allstepdata,expt)  
+hfig2 = [];
 stepdur = round(0.25/expt.wc.dt);
 stepstart = 553;
 
 stepdata = mean(allstepdata,1);
+V_i = max(stepdata);
 stepdata=(stepdata- max(stepdata));
 rin_x = [0:size(stepdata,2)-1];
 
@@ -48,9 +49,65 @@ out_struct.Rs = min(rs_fitline)/stepamp;
 rin_tau = -1/rin_t;  
 out_struct.TaoCell = rin_tau;
 out_struct.Cm = (rin_tau / round(out_struct.Rin*1000000))*1000000000000; %seconds / ohms
-    % divide by 10^12 to return Capacitance in picoFarads
+% divide by 10^12 to return Capacitance in picoFarads
 
-%  %% to plot when fooling around with the data bit by bit   
+V_d = min(rin_fitline) + min(rs_fitline);
+out_struct.V_f = V_i + V_d;
+
+% subtract out electrode and non-voltage dependent component
+tmp = stepdata - rs_fitline - rin_fitline;
+
+%fit for slowly activating depol
+tmp = tmp - max(tmp);
+options.Lower = [-Inf,-Inf];
+options.Upper = [0,0];
+fd = fit(xtimestep', tmp' , 'exp1' ,options);
+fitlineD = fd.a*exp(fd.b*xtimestep);
+[rD rmse] = rsquare(tmp,fitlineD);
+fitlineD = fitlineD - min(fitlineD);
+
+hfig3 = figure;
+hold on
+line(xtimestep,tmp,'color','k','LineWidth',3)
+line(xtimestep,fitlineD,'color','b','LineWidth',2)
+
+% fit for slowly activating hyperpol
+tmp = tmp - min(tmp);
+options.Lower = [0,-Inf];
+options.Upper = [Inf,0];
+fh = fit(xtimestep', tmp' , 'exp1' ,options);
+fitlineH = fh.a*exp(fh.b*xtimestep);
+[rH rmse] = rsquare(tmp,fitlineH);
+fitlineH = fitlineH - max(fitlineH);
+
+%cant know conductance because can't know current
+if rD >= rH 
+    out_struct.Gv_dv = max(fitlineD);
+    out_struct.TaoV = -1/fd.b;
+    
+    hfig2 = figure;
+    hold on
+    line(xtimestep,(stepdata- max(stepdata)+V_i),'color','k','LineWidth',2)
+    line(xtimestep,rin_fitline+V_i,'color','g','LineWidth',2)
+    line(xtimestep,rs_fitline+V_i,'color','r','LineWidth',2)
+    line(xtimestep,fitlineD+V_i,'color','b','LineWidth',2)
+end
+
+if rH > rD
+    out_struct.Gv_dv = min(fitlineD);
+    out_struct.TaoV = -1/fh.b;
+    
+    hfig2 = figure;
+    hold on
+    line(xtimestep,(stepdata- max(stepdata)-V_i),'color','k','LineWidth',2)
+    line(xtimestep,rin_fitline-V_i,'color','g','LineWidth',2)
+    line(xtimestep,rs_fitline-V_i,'color','r','LineWidth',2)
+    line(xtimestep,fitlineH-V_i,'color','b','LineWidth',2)
+end
+
+
+
+%% to plot when fooling around with the data bit by bit   
 %     %%%%%%
 % 
 % figure;
@@ -79,3 +136,7 @@ out_struct.Cm = (rin_tau / round(out_struct.Rin*1000000))*1000000000000; %second
 % ci = confint(cf);
 % title(['95% confidence interval on slope ('...
 %     num2str(cf.p1) ') = [' num2str(ci(:,1)') ']'],'FontSize',18)
+%
+    
+
+

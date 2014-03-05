@@ -9,6 +9,7 @@ if isempty(spikesmat)
     return
 end
 
+
 for itrial=1:size(spikesmat,1)
     spiketimes{itrial}=find(spikesmat(itrial,:))*dt;
     meanisi(itrial)=mean(diff(spiketimes{itrial}))/dt;
