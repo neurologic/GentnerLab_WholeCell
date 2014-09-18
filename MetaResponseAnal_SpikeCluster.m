@@ -13,7 +13,8 @@ for ispk = 1:size(shape,1)
     prespk = shape(ispk,225:276);
     
     if ~isempty(find(prespk))
-    threshind = find(prespk == initVm(ispk));
+%     threshind = find(prespk == initVm(ispk));
+threshind = crossing(prespk,[],initVm(ispk)) + 1;
 %     if isempty(threshind)
 %         threshind = crossing(prespk,[],initVm(itrial)) + 1;
 %     end

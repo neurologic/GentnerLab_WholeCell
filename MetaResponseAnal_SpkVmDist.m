@@ -55,6 +55,8 @@ pVm = cnt_vm / size(bin_vm,2);
 % pSpk = pVm .* (cnt_spk ./ cnt_vm);
 out_struct.pSpk = (cnt_spk ./ cnt_vm);
 
-    
+
+
+
 
 

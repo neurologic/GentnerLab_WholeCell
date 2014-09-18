@@ -1,8 +1,9 @@
 r=rigdef('mac')
+
 %%
 
 
-save([r.Dir.Expt 'Analysis/Meta_Responses_DB/exptsForICanal.mat'])
+%   save([r.Dir.Expt 'Analysis/Meta_Responses_DB/exptsForICanal_revised2.mat'])
 % ,...
 %     'exptnames','readyexpt','sigdata','vardata','basewin','allstims','repexpts',...
 %     'addstimcond','vmresp','base_vmresp','base_spkresp','spkresp','respDB',...
@@ -10,7 +11,7 @@ save([r.Dir.Expt 'Analysis/Meta_Responses_DB/exptsForICanal.mat'])
 %     's_base','s_stim','base_spk_vm','stim_spk_vm','stim_spk_thresh','stim_spk_thresh')
 
 %%
-load([r.Dir.Expt 'Analysis/Meta_Responses_DB/exptsForICanal.mat'])
+load([r.Dir.Expt 'Analysis/Meta_Responses_DB/exptsForICanal_revised2.mat'])
 
 %%
 repexpts = {
@@ -202,7 +203,7 @@ stim_spk_thresh = [];
 stim_spk_thresh = [];
 stimind = 1;
 
-PlotRinRsCm = 1;
+PlotRinRsCm = 0;
 plotSpikeShape = 0;
 plotResidVm = 0;
 
@@ -214,6 +215,7 @@ plotResidVm = 0;
 Rin = [];
 Rs = [];
 Rv = [];
+sagR = [];
 TaoCell = [];
 TaoV = [];
 Cm = [];
@@ -713,7 +715,7 @@ title(['n = ' num2str(size(idx,1))]);
 %can filter some based on Rs because i know that causes lowpass filtering
 %i can only use cells that don't pass for measure of variance in Vm
 ncols = 4;
-[colvec colsize rowvec rowsize] = subplotinds(ncols,size(all_SpkVmBins,2));
+[colvec colsize rowvec rowsize] = subplotinds(ncols,size(all_SpkVmBins,2),0);
 VmEdges = [-90:1:-10];
 hfig = figure;
 hold on
@@ -893,6 +895,7 @@ psth_gz = medfilt1(psth_gz,200,[],2);
 
 %%
 %%%%% prep for Vm variance for each cell: signal pair
+sigind = 1;
 for iexpt=1:size(repexpts,1)
     %         if ~isempty(regexp(repexpts{iexpt},unq_expts{iunq}))
     thisexpt=repexpts{iexpt};
@@ -900,10 +903,17 @@ for iexpt=1:size(repexpts,1)
     vmexpt=filtesweeps(expt,0,'Vm',0); %filter expt for 0 mV assuming
     table=getClampTab(expt,{'clamp',0});
     thiscond=getsubstimcond(expt.stimcond,table.sigsplayed);
-    [sigon,sigoff]=GetSigTimes(expt,thiscond,1);
-    allon (iexpt) = sigon;
-    alloff(iexpt) = sigoff;
-    alldatalen(iexpt) = size(vmexpt.wc.data,2);
+    for isig = 1:size(thiscond,2)
+        if ~isempty(regexp(thiscond(isig).wavnames,'ws'))
+            continue
+        end
+    [sigon,sigoff]=GetSigTimes(expt,thiscond,isig);
+    allon (sigind) = sigon;
+    alloff(sigind) = sigoff;
+    alldatalen(sigind) = size(vmexpt.wc.data,2);
+    allsiglen(sigind) = sigoff - sigon;
+    sigind = sigind + 1;
+    end
 end
 
 %% get stimulus wavs
@@ -921,9 +931,17 @@ for iexpt=1:size(repexpts,1)
     thiscond=getsubstimcond(expt.stimcond,table.sigsplayed(keepsigs));
     
     for isig = 1:size(thiscond,2)
+        %skip warped shortened tempo stims
+        if ~isempty(regexp(thiscond(isig).wavnames,'ws'))
+            continue
+        end
         sig_wav{sigind} = thiscond(isig).wavs;
+      %%%%%%%%%%%%i guess i high-pass fft'ed these at some point?
         %         A = {'one','two','twenty-two','One','two'};
-        siglen(sigind) = size(thiscond(isig).wavs,1)
+        siglen(sigind) = size(thiscond(isig).wavs,1);
+        sigexpt = filtesweeps(vmexpt,0,'wavnames',thiscond(isig).wavnames);
+        tmpresp = medfilt1(sigexpt.wc.data,200,[],2);
+        
         tmpnames = strvcat(tmpnames ,thiscond(isig).wavnames);
         sigind = sigind + 1;
     end
@@ -941,7 +959,8 @@ for iwav = 1:size(sig_wav,2)
 end
 
 fs = 44100;
-unqwaves = allwavs(ia,:);
+unqwaves = allwavs;
+% unqwaves = allwavs(ia,:);
 rmswav = [];
 filtwav = [];
 for iwav = 1:size(unqwaves,1)
@@ -957,15 +976,17 @@ figure;
 line([1:size(meanRMSstims,2)]/fs,meanRMSstims/max(meanRMSstims),'color','k','LineWidth',4)
 normVm = mean(vm_mean) - min(mean(vm_mean));
 normVm = normVm / max(normVm);
-vmtime = [1:size(normVm,2)]*expt.wc.dt - 0.5;
+vmtime = [1:size(normVm,2)]*expt.wc.dt - prestim_time;
 line(vmtime,normVm,'color','r','LineWidth',4)
 normVar = mean(vm_var) - min(mean(vm_var));
 normVar = normVar / max(normVar);
 line(vmtime,normVar,'color','b','LineWidth',4)
 
 
-normvar = normVar(1,round(0.5/expt.wc.dt):end);
+normvar = normVar(1,round(prestim_time/expt.wc.dt):end);
 normvar = normvar/max(normvar);
+normvm = normVm(1,round(prestim_time/expt.wc.dt):end);
+normvm = normvm/max(normvm);
 olddt=1/fs;
 bin=round(1/olddt/round(1/expt.wc.dt));
 newdt=olddt*bin;
@@ -981,7 +1002,7 @@ cf = fit(dnsampRMS',normvar','exp1');
 % fitline = cf.p1*dnsampRMS + cf.p2;
 fitline = cf.a*exp(cf.b*dnsampRMS)
 line(dnsampRMS,fitline,'color','r')
-[r rmse] = rsquare(dnsampRMS,fitline);
+[rsq rmse] = rsquare(dnsampRMS,fitline);
 xlabel('normalized RMS','FontSize',14)
 ylabel('normalized Vm Variance','FontSize',14)
 text(0.5,0.9,[num2str(cf.a) '*exp(' num2str(cf.b) '*RMS)'],'FontSize',14)
@@ -992,6 +1013,7 @@ for ibin = 1:size(nvar,2)
     bininds = find(bin == ibin);
     binRMS (ibin) = mean(dnsampRMS(bininds));
     binVAR (ibin) = mean(normvar(bininds));
+    binVM (ibin) = mean(normvm(bininds));
 end
 figure;
 hold on
@@ -1002,9 +1024,21 @@ set(gca,'YLim',[0,1],'XLim',[0,1])
 cf = fit(binRMS',(binVAR - min(binVAR))','exp1');
 fitline = cf.a*exp(cf.b*binRMS) + min(binVAR);
 line(binRMS,fitline,'color','r')
-[r rmse] = rsquare(binVAR,fitline);
-title(['r-square for exp1 fit = ' num2str(r)...
+[rsq rmse] = rsquare(binVAR,fitline);
+title(['r-square for exp1 fit = ' num2str(rsq)...
     '  ;  offset (min variance) = ' num2str(min(binVAR))],'FontSize',18)
+figure;
+hold on
+scatter(binRMS,binVM,100,'k','fill')
+xlabel('mean RMS per bin','FontSize',14)
+ylabel('mean Vm per binned mean RMS','FontSize',14)
+set(gca,'YLim',[0,1],'XLim',[0,1])
+cf = fit(binRMS',(binVM - min(binVM))','exp1');
+fitline = cf.a*exp(cf.b*binRMS) + min(binVM);
+line(binRMS,fitline,'color','r')
+[rsq rmse] = rsquare(binVM,fitline);
+title(['r-square for exp1 fit = ' num2str(rsq)...
+    '  ;  offset (min vm) = ' num2str(min(binVM))],'FontSize',18)
 
 figure;
 hold on
@@ -1059,7 +1093,7 @@ line(xtime,yVAR,'color','k');
 line(xtime,fitline,'color','r');
 
 %fit Vm mean
-normean = normVm(1,round(0.5/expt.wc.dt):end);
+normean = normVm(1,round(prestim_time/expt.wc.dt):end);
 normean = normean/max(normean);
 normean = normean(1,1:minlen);
 endl = round(endt/expt.wc.dt);
@@ -1068,7 +1102,7 @@ xtime = [1:endl]*expt.wc.dt;
 figure;
 plot(normVm');
 xonset = input('xtime onset')
-xonset = xonset - round(0.5/expt.wc.dt);
+xonset = xonset - round(prestim_time/expt.wc.dt);
 yMEAN = normean(1,xonset:endl+xonset-1);
 tmp = yMEAN - median(normean(1,2000:7000));
 options.Lower = [-Inf,-Inf];
@@ -1091,6 +1125,8 @@ VarDecParam.VarDecOnset = xonset * expt.wc.dt;
 
 
 %% from stimulus onset
+%each cell:signal pair is an average; the figures are the median across
+%those variance vectors
 vm_var = [];
 vm_mean = [];
 siglen = min(alloff - allon);
@@ -1105,40 +1141,58 @@ for iexpt=1:size(repexpts,1)
     table=getClampTab(expt,{'clamp',0});
     keepsigs=reprequire(table,trials);
     thiscond=getsubstimcond(expt.stimcond,table.sigsplayed(keepsigs));
-    startind = allon(iexpt) - prestim_len;
-    stopind = allon(iexpt) + siglen;
+    
     
     for isig = 1:size(thiscond,2)
+        %skip warped shortened tempo stims
+        if ~isempty(regexp(thiscond(isig).wavnames,'ws'))
+            continue
+        end
         sigexpt = filtesweeps(vmexpt,0,'wavnames',thiscond(isig).wavnames);
         sigdata = sigexpt.wc.data*1000;
         sigdata_filt = medfilt1(sigdata,200,[],2);
         
-        vm_var(sigind,:) = var(sigdata_filt(:,startind:stopind));
-        vm_mean(sigind,:) = mean(sigdata_filt(:,startind:stopind));
+        [sigon,sigoff]=GetSigTimes(sigexpt,thiscond,isig);
+        startind = sigon - prestim_len;
+        stopind = sigon + siglen;
+        
+         baselinevar = median(var(sigdata_filt(:,expt.analysis.params.baselinewin(1):sigon)));
+        
+        vm_var(sigind,:) = var(sigdata_filt(:,startind:stopind))./baselinevar; % percent baseline var
+        vm_mean(sigind,:) = mean(sigdata_filt(:,startind:stopind)); %these estimates are not referenced to prestim var
         sigind = sigind + 1;
     end
     %%%need to do this where I do an average for each cell...
     % instead of this where every cell:signal pair is its own average
 end
+ %these estimates are not referenced to prestim var
 
 %get ci on var
-confint = [];
+CIvar = [];
 for isamp = 1:size(vm_var,2)
-    confint(isamp,:) = getCDFconf (vm_var(:,isamp),95);
+    CIvar(isamp,:) = getCDFconf (vm_var(:,isamp),85);
 end
 
 xtime = ([1:size(vm_var,2)]*expt.wc.dt)-prestim_time;
 figure;
-line(xtime,mean(vm_var),'color','k','LineWidth',3)
-line(xtime, confint(:,1),'color',[0.5 0.5 0.5])
-line(xtime, confint(:,2),'color',[0.5 0.5 0.5])
+line(xtime,median(vm_var),'color','k','LineWidth',3)
+line(xtime, CIvar(:,1),'color',[0.5 0.5 0.5])
+line(xtime, CIvar(:,2),'color',[0.5 0.5 0.5])
 axis tight
-set(gca,'YLim',[-10,90]);
+set(gca,'YLim',[-0.2,1.5]);
 ylims = get(gca,'YLim');
 line([0,0],[ylims(1),ylims(2)],'LineStyle','--','color','k');
 ylabel('mean variance ; 95% CI','FontSize',14)
 xlabel('seconds','FontSize',14)
 
+zeroind = find(xtime ==0)
+medianMedianVar = median(median(vm_var(:,zeroind:end)'))
+CI = getCDFconf(median(vm_var(:,zeroind:end)'),85)
+medianCIacrossTime = median(CIvar(zeroind:end,:))
+numstimuli = size(vm_var,1)
+[h,p]=kstest2(median(vm_var(:,zeroind:end)'),median(vm_var(:,1:zeroind-1)'))
+baselineMedianVar = median(median(vm_var(:,1:zeroind-1)'))
+we clustered a set of membrane vectors pooled across all trials within 5 randomly selected windows into 5 clusters
 figure;
 line(xtime,mean(vm_mean),'color','k','LineWidth',3)
 axis tight
@@ -1146,32 +1200,45 @@ ylims = get(gca,'YLim');
 line([0,0],[ylims(1),ylims(2)],'LineStyle','--','color','k');
 ylabel('mean membrane potential (mV)','FontSize',14)
 xlabel('seconds','FontSize',14)
+%%%what is the mean Vrest across this... (look at the offset "inhibition",
+%%%does it go below Vrest? ...as far as I know it IS Vrest
 
 %calculate when var drops below mean var during pre-stim...
 %select that as start point to calculate time constant of decline of var
 
-prestim_vars = mean(vm_var(:,1:(prestim_len)));
-[xb, prestim_vardist] =empcdf(prestim_vars);
-prestim_ci = getCDFconf (prestim_vars,99);
+% prestim_vars = mean(vm_var(:,1:(prestim_len)));
+% [xb, prestim_vardist] =empcdf(prestim_vars);
+% prestim_ci = getCDFconf (prestim_vars,99);
+% 
+% for isamp = (prestim_len):size(vm_var,2)
+%     thisvar = mean(vm_var(:,isamp));
+%     if thisvar < (prestim_ci(1))
+%         lowvar(isamp) = 1;
+%     else lowvar(isamp) = 0;
+%     end
+% end
+% 
+% winlen = 5;
+% for isamp = 1:size(lowvar,2) - winlen
+%     meanlen(isamp) = sum(lowvar(1,isamp:isamp+winlen));
+% end
 
-for isamp = (prestim_len):size(vm_var,2)
-    thisvar = mean(vm_var(:,isamp));
-    if thisvar < (prestim_ci(1))
-        lowvar(isamp) = 1;
-    else lowvar(isamp) = 0;
-    end
-end
-
-winlen = 5;
-for isamp = 1:size(lowvar,2) - winlen
-    meanlen(isamp) = sum(lowvar(1,isamp:isamp+winlen));
-end
-signif_drop = crossing(meanlen,[],4);
-
-% fitend = round(0.5/expt.wc.dt);
-vmdrop = mean(vm_var(:,(min(signif_drop)):end));
-% vmdrop = vmdrop(1,1:fitend) - median(vmdrop);
+% crossinds = crossing(meanlen,[],4);
+% signif_drop = crossinds(min(find(crossinds>sigon)));
+figure;hold on
+line([1:size(vm_var,2)],mean(vm_var),'color','k')
+line([1:size(vm_var,2)],median(vm_var),'color','r')
+title('median var in red, mean var in black')
+xonset = input('xtime onset off of median')
+% % fitend = round(0.5/expt.wc.dt);
+% vmdrop = mean(vm_var(:,(min(signif_drop)):end));
+% % vmdrop = vmdrop(1,1:fitend) - median(vmdrop);
+stopt = xonset + 0.2/expt.wc.dt;
+vmdrop = median(vm_var);
 vmdrop = vmdrop - median(vmdrop);
+vmdrop =(vmdrop(1,xonset:stopt));
+
+
 vmdrop_time = [1:size(vmdrop,2)]*expt.wc.dt;
 cf = fit(vmdrop_time',vmdrop','exp1');
 fitline = cf.a*exp(cf.b*vmdrop_time);
@@ -1182,6 +1249,25 @@ line(vmdrop_time,fitline,'color','r')
 
 timeconstant = -1/cf.b
 
+%%%%%%%%%%%%% this is the figure to save and plot
+figure; hold on
+vmdrop = median(vm_var);
+xtime = ([1:size(vmdrop,2)]*expt.wc.dt) - prestim_len*expt.wc.dt;
+line(xtime,vmdrop,'color','k')
+% fitline = cf.a*exp(cf.b*([1:size(vmdrop,2)-prestim_len]*expt.wc.dt));
+xtime = ([1:size(fitline,2)]*expt.wc.dt) - prestim_len*expt.wc.dt + xonset*expt.wc.dt;
+line(xtime,fitline+median(vmdrop),'color','r')
+set(gca,'YLim',[0,1.5],'XLim',[-0.5,0.5])
+title(num2str(timeconstant))
+%%%%%%%%%%
+%%%%%%%% baseline level looks below "1"...
+%%%%%% because plotting median? ...so try using median during analysis...
+%%%%%%%%%%%%%%%%% would change the % that it dropped, but better than
+%%%%%%%%%%%%%%%%% baseline being below 1 since baseline is the ref
+
+prestimvar = mean(median(vm_var(:,1:xonset)))
+stimvar = mean(median(vm_var(:,(xonset+round((timeconstant*6)/expt.wc.dt)):end)))
+vardec = stimvar/prestimvar
 
 %%
 % compare mean_vm with mean spike psth
@@ -1264,6 +1350,7 @@ xlabel('seconds','FontSize',14)
 % line(dnsamp_xtime, (mean(normvm) - min(mean(normvm)))')
 % line(spktime, (normspk - min(normspk(1,5:end-5)))')
 %% from stimulus offset
+%make the var plotted as a % of baseline var
 off_vm_var = [];
 off_vm_mean = [];
 sigind = 1;
@@ -1276,15 +1363,20 @@ for iexpt=1:size(repexpts,1)
     vmexpt=filtesweeps(expt,0,'Vm',0); %filter expt for 0 mV assuming
     table=getClampTab(expt,{'clamp',0});
     thiscond=getsubstimcond(expt.stimcond,table.sigsplayed);
-    startind = alloff(iexpt)-preoffset_len;
-    stopind = alloff(iexpt) + postoffset_len;
+    startind = alloff(sigind)-preoffset_len;
+    stopind = alloff(sigind) + postoffset_len;
     
     for isig = 1:size(thiscond,2)
+         if ~isempty(regexp(thiscond(isig).wavnames,'ws'))
+            continue
+        end
         sigexpt = filtesweeps(vmexpt,0,'wavnames',thiscond(isig).wavnames);
         sigdata = sigexpt.wc.data*1000;
         sigdata_filt = medfilt1(sigdata,200,[],2);
         
-        off_vm_var(sigind,:) = var(sigdata_filt(:,startind:stopind));
+        baselinevar = median(var(sigdata_filt(:,expt.analysis.params.baselinewin(1):allon(sigind))));
+        
+        off_vm_var(sigind,:) = var(sigdata_filt(:,startind:stopind))./baselinevar;
         off_vm_mean(sigind,:) = mean(sigdata_filt(:,startind:stopind));
         sigind = sigind + 1;
     end
@@ -1294,12 +1386,12 @@ end
 
 %get ci on var
 for isamp = 1:size(off_vm_var,2)
-    confint(isamp,:) = getCDFconf (off_vm_var(:,isamp),95);
+    confint(isamp,:) = getCDFconf (off_vm_var(:,isamp),85);
 end
 
 xtime = ([1:size(off_vm_var,2)]*expt.wc.dt)-preoffset_len*expt.wc.dt;
 figure;
-line(xtime,mean(off_vm_var),'color','k','LineWidth',3)
+line(xtime,median(off_vm_var),'color','k','LineWidth',3)
 line(xtime, confint(:,1),'color',[0.5 0.5 0.5])
 line(xtime, confint(:,2),'color',[0.5 0.5 0.5])
 axis tight
@@ -1310,7 +1402,7 @@ ylabel('mean variance ; 95% CI','FontSize',14)
 xlabel('seconds','FontSize',14)
 
 figure;
-line(xtime,mean(off_vm_mean),'color','k','LineWidth',3)
+line(xtime,median(off_vm_mean),'color','k','LineWidth',3)
 axis tight
 ylims = get(gca,'YLim');
 line([0,0],[ylims(1),ylims(2)],'LineStyle','--','color','k');
@@ -1338,32 +1430,126 @@ for isamp = 1:size(lowvar,2) - winlen
 end
 signif_drop = crossing(meanlen,[],9);
 
-% fitend = round(0.5/expt.wc.dt);
-vmdrop = mean(off_vm_var(:,(min(signif_drop)):end));
-% vmdrop = vmdrop(1,1:fitend) - median(vmdrop);
-vmdrop = vmdrop - median(vmdrop);
-vmdrop_time = [1:size(vmdrop,2)]*expt.wc.dt;
-cf = fit(vmdrop_time',vmdrop','exp1');
-fitline = cf.a*exp(cf.b*vmdrop_time);
+% % fitend = round(0.5/expt.wc.dt);
+% vmdrop = mean(off_vm_var(:,(min(signif_drop)):end));
+% % vmdrop = vmdrop(1,1:fitend) - median(vmdrop);
+% vmdrop = vmdrop - median(vmdrop);
+figure;hold on
+% line([1:size(off_vm_var,2)],mean(off_vm_var),'color','k')
+line([1:size(off_vm_var,2)],median(off_vm_var),'color','r')
+title('median var in red, mean var in black')
+xonset = input('xtime onset off of median')
+xoffset = input('xtime back to baseline')
+yattach_val = input('bottom of begin to rise (yval)')
+% % fitend = round(0.5/expt.wc.dt);
+% vmdrop = mean(vm_var(:,(min(signif_drop)):end));
+% % vmdrop = vmdrop(1,1:fitend) - median(vmdrop);
+
+vmrise = median(off_vm_var);
+vmrise =(vmrise(1,xonset:xoffset));
+% attach = nan(1,2000);
+% attach(:) = yattach_val;
+% vmrise = [attach vmrise];
+vmrise = vmrise - yattach_val;
+
+
+vmrise_time = [1:size(vmrise,2)]*expt.wc.dt;
+cf = fit(vmrise_time',vmrise','exp1');
+fitline = cf.a*exp(cf.b*vmrise_time);
 
 figure;hold on
-line(vmdrop_time,vmdrop,'color','k')
-line(vmdrop_time,fitline,'color','r')
+line(vmrise_time,vmrise,'color','k')
+line(vmrise_time,fitline,'color','r')
 
+
+timeconstant = -1/cf.b
+
+figure; hold on
+vmrise = median(off_vm_var);
+xtime = ([1:size(vmrise,2)]*expt.wc.dt) - preoffset_len*expt.wc.dt;
+line(xtime,vmrise,'color','k')
+xtime = ([1:size(fitline,2)]*expt.wc.dt) - preoffset_len*expt.wc.dt + xonset*expt.wc.dt;
+line(xtime,fitline+yattach_val,'color','r')
+axis tight
+set(gca,'YLim',[0,1.5],'XLim',[-0.5,1])
+%%
 
 %%
 %get Vm response windows and p(spike) in those windows?
 
 
-
+for iexpt=1:size(repexpts,1)
+    
+        thisexpt=repexpts{iexpt};
+        load([r.Dir.Expt thisexpt])
+        
+        vmexpt=filtesweeps(expt,0,'Vm',0); %filter expt for 0 mV assuming
+        %get spiking threshold
+        highpassdata=HighpassGeneral(vmexpt.wc.data,1/expt.wc.dt);
+        hfig = figure;plot(highpassdata')
+        spkthreshAll(iexpt) = input('Choose spike threshold:');
+        spkthreshAll(iexpt) = spkthreshAll(iexpt) *1000;
+        close(hfig)
+    
+end
+spkthreshAll = [0.01
+0.01
+0.01
+0.01
+0.01
+0.01
+0.01
+0.01
+0.01
+0.01
+0.01
+0.025
+0.01
+0.01
+0.01
+0.01
+0.01
+0.01
+0.015
+0.01
+0.01
+0.01
+0.01
+0.005
+0.01]*1000;
+%%
+doforEPS = 0;
+doplot = 0;
+Vthresh = [];
+BaseVmVar = [];
 VmRespVec_up = [];
 VmRespVec_low = [];
 VmBaseConf = [];
-VmAllLen = [];
+SubRespWin_up = [];
+SubRespWin_low = [];
+SpkRespWin_up = [];
+SpkRespWin_low = [];
+SpkRespRate_up = [];
+SpkRespRate_low = [];
+SpkRespRate_not = [];
+VmRespMean_up = [];
+VmRespVar_up = [];
+VmRespMean_low = [];
+VmRespVar_low = [];
+VmNotVec = [];
+VmNotVar = [];
+siglen = [];
+signame = [];
+
+TrackCellInfo = [];
+TrackSigInfo = [];
+%%%%need to keep track of stimulus names so that at end can only report for
+%%%%each stimulus once (pick the loudest db if there are multiple)
+%%
 unqind = 1;
 for iunq = 1:size(unq_expts,2)
-    unq_expts{iunq};
-    siglen = 0;
+    unq_expts{iunq}
+    
     allstepdata = [];
     this_cell = unq_expts{iunq};
     Vrest = [];
@@ -1372,170 +1558,908 @@ for iunq = 1:size(unq_expts,2)
     response_vm_max = [];
     up_win = [];
     low_win = [];
-    allVmRespVec = [];
+    allVmRespVec_up = [];
+    allVmRespVec_low = [];
+    
     sigind = 1;
     for iexpt=1:size(repexpts,1)
         if ~isempty(regexp(repexpts{iexpt},this_cell))
             thisexpt=repexpts{iexpt};
             load([r.Dir.Expt thisexpt])
-            
+                        
             vmexpt=filtesweeps(expt,0,'Vm',0); %filter expt for 0 mV assuming
-            % for now do not care if db or not
-            %             [dbstimcond,dblevels]=getDBstimcond(vmexpt);
+            % for now do not care if db or not. else: [dbstimcond,dblevels]=getDBstimcond(vmexpt);
             table=getClampTab(expt,{'clamp',0});
-            
             keepsigs=reprequire(table,trials);
             allsig=table.sigsplayed;
             repsigs=allsig(keepsigs);
             stimcond=getsubstimcond(expt.stimcond,table.sigsplayed(keepsigs));
             
+            %get spiking threshold
+            spk_thresh = spkthreshAll(iexpt);
+            
             for istim = 1:size(stimcond,2)
+                input_struct = [];
+                %skip warped shortened tempo stims
+                if ~isempty(regexp(stimcond(istim).wavnames,'ws'))
+                    continue
+                end
+                 TrackCellInfo{iunq,sigind} = expt.name;
+                  TrackSigInfo{iunq,sigind} = stimcond(istim).wavnames;
+                  
                 sigexpt = filtesweeps(vmexpt,0,'wavnames',stimcond(istim).wavnames);
-                input_struct.sigdata = sigexpt.wc.data*1000;
-                input_struct.sigdata_filt = medfilt1(input_struct.sigdata,200,[],2);
+                sigdata = sigexpt.wc.data(:,1:end-4)*1000;
+                sigdata_filt = medfilt1(sigdata,200,[],2);
+                
+                input_struct.sigdata = sigdata;
+                input_struct.sigdata_filt = sigdata_filt;
+                
                 
                 basetimes = sigexpt.analysis.params.baselinewin;
                 [sigon,sigoff]=GetSigTimes(sigexpt,stimcond,istim);
+                
                 %set up input_struct with data to pass analysis functions
                 input_struct.basetimes = basetimes;
                 input_struct.sigon = sigon;
                 input_struct.sigoff = sigoff;
                 
-                siglen = siglen + size(input_struct.sigdata_filt(:,basetimes(1):end),2);
+                siglen{unqind,sigind} = sigoff-sigon; %size(sigdata_filt(:,basetimes(1):end),2);
+                signame{unqind,sigind} = stimcond(istim).wavnames;
                 
                 %prep spiking to be continuous and get spiking windows
-                highpassdata=HighpassGeneral(input_struct.sigdata,1/expt.wc.dt); 
-                [spikesmat, gausstosmooth]=getspikesmat(highpassdata,threshold,dt);
+                highpassdata=HighpassGeneral(sigdata,1/expt.wc.dt);
+                [spikesmat, gausstosmooth, spiketimes]=getspikesmat(highpassdata,spk_thresh,expt.wc.dt);
                 
-                
-                % get vm response windows
-                out_struct = MetaResponseAnal_VmResponseWin(expt,input_struct)
-                allfields = fieldnames(out_struct);
-                for ifield = 1:size(allfields,1)
-                    s = [allfields{ifield} '{sigind} = out_struct.' allfields{ifield} ';'];
-                    eval(s)
+                if ~isempty(gausstosmooth)
+                    spkvec = zeros(size(spikesmat,1),size(spikesmat,2));
+                    spkvec(find(spikesmat)) = 1;
+                    smoothspk = [];
+                    for itrial = 1:size(spkvec,1)
+                        smoothspk(itrial,:) = conv(spkvec(itrial,:),gausstosmooth,'same');
+                    end
+                    
+                    conf_p = 95;
+                    windowsize = 500;
+                    binsize = 10;
+                    bin_p = 0.85;
+                    
+                    confint_spk = getCDFconf (mean(smoothspk(:,basetimes(1):sigon)),conf_p);
+                    
+                    [up_inds_spk, low_inds_spk] = WindowResponse(mean(smoothspk(:,sigon:sigoff)),...
+                        confint_spk, windowsize, binsize, bin_p);
+                    all_inds_spk = union(up_inds_spk,low_inds_spk);
+                    all_inds = [1:(sigoff-sigon)];
+                    all_inds(all_inds_spk) = 0;
+                    notinds = find(all_inds);
+                    up_win_spk = getWindowEdges (up_inds_spk, 1, 1)+sigon;
+                    low_win_spk = getWindowEdges (low_inds_spk, 1, 1)+sigon;
+                    SpkRespWin_up{unqind,sigind} = up_win_spk;
+                    SpkRespWin_low{unqind,sigind} = low_win_spk;
+                    
+                    %get spike rate per response
+                    allrate = [];
+                    for iwin = 1:size(up_win_spk,2)
+                        allspk = size(find(spikesmat(:,up_win_spk(1,iwin):up_win_spk(2,iwin))==1),1);
+                        allrate(iwin) = (allspk/size(spikesmat,1)) / ...
+                            (diff(up_win_spk(:,iwin))*expt.wc.dt);
+                    end
+                    SpkRespRate_up{unqind,sigind} = allrate;
+                    
+                    allrate = [];
+                    for iwin = 1:size(low_win_spk,2)
+                        allspk = size(find(spikesmat(:,low_win_spk(1,iwin):low_win_spk(2,iwin))==1),1);
+                        allrate(iwin) = (allspk/size(spikesmat,1)) / ...
+                            (diff(low_win_spk(:,iwin))*expt.wc.dt);
+                    end
+                    SpkRespRate_low{unqind,sigind} = allrate;
+                    
+                    tmp_mat = spikesmat;
+                    tmp_mat(:,all_inds_spk) = 0;
+                    %double check that sigon:sigoff was not already
+                    %accounted for
+                    tmp_mat = tmp_mat(:,sigon:sigoff);
+                    not_spks = size(find(tmp_mat == 1),1);
+                    SpkRespRate_not{unqind,sigind} = (not_spks/size(spikesmat,1))/((sigoff-sigon)*expt.wc.dt);
+                    
+                    
+                    
+                    
+                    if doplot == 1
+                        spkrespfig = figure;
+                        hold on
+                        for itrial = 1:size(smoothspk,1)
+                            thesespks = find(spkvec(itrial,:))*expt.wc.dt
+                            for ispike = 1:size(thesespks,2)
+                                line([thesespks(ispike),thesespks(ispike)],...
+                                    [1*itrial,(1*itrial)+1],'color','k')
+                            end
+                        end
+                        set(gca,'YLim',[1,size(smoothspk,1)+1],'XLim',[1*expt.wc.dt,size(smoothspk,2)*expt.wc.dt])
+                        
+                        SigTimeBox(gca, (sigon)*expt.wc.dt,sigoff*expt.wc.dt, get(gca,'YLim'),[0.5 0.5 0.5]);
+                        for iresp=1:size(up_win_spk,2)
+                            SigTimeBox(gca, up_win_spk(1,iresp)*expt.wc.dt, ...
+                                up_win_spk(2,iresp)*expt.wc.dt, get(gca,'YLim'),'r');
+                        end
+                        for inhib=1:size(low_win_spk,2)
+                            SigTimeBox(gca, low_win_spk(1,inhib)*expt.wc.dt, ...
+                                low_win_spk(2,inhib)*expt.wc.dt, get(gca,'YLim'),'b');
+                        end
+                        %                     axis tight
+                        set(gca,'TickDir','out')
+                        
+                        box off
+                        set(spkrespfig,'Position',[212         523        1168         283])
+                        title([expt.name stimcond(istim).wavnames],'Interpreter','none')
+                        
+                        %                 saveas(spkrespfig, ...
+                        %                     ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/SpkRespWin/' ...
+                        %                     expt.name '_' stimcond(istim).wavnames '.fig']);
+                        %                 saveas(spkrespfig, ...
+                        %                     ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/SpkRespWin/' ...
+                        %                     expt.name '_' stimcond(istim).wavnames '.tif']);
+                        close(spkrespfig)
+                        %
+                        %plot without patches for eps
+                        if doforEPS == 1;
+                            spkrespfig = figure;
+                            hold on
+                            for itrial = 1:size(smoothspk,1)
+                                thesespks = find(spkvec(itrial,:))*expt.wc.dt
+                                for ispike = 1:size(thesespks,2)
+                                    line([thesespks(ispike),thesespks(ispike)],[1*itrial,(1*itrial)+1])
+                                end
+                            end
+                            set(gca, 'YLim',[-0.5,size(smoothspk,1)+1],'XLim',[1*expt.wc.dt,size(smoothspk,2)*expt.wc.dt])
+                            
+                            line([(sigon)*expt.wc.dt,sigoff*expt.wc.dt], [1,1],'color','k');
+                            for iresp=1:size(up_win_spk,2)
+                                line([up_win_spk(1,iresp)*expt.wc.dt, ...
+                                    up_win_spk(2,iresp)*expt.wc.dt], [0.5,0.5],'color','r');
+                            end
+                            for inhib=1:size(low_win_spk,2)
+                                line([low_win_spk(1,inhib)*expt.wc.dt, ...
+                                    low_win_spk(2,inhib)*expt.wc.dt], [0,0],'color','b');
+                            end
+                            box off
+                            set(gca,'TickDir','out')
+                            set(spkrespfig,'Position',[212         523        1168         283])
+                            title([expt.name stimcond(istim).wavnames],'Interpreter','none')
+                            
+                            %                         saveas(spkrespfig, ...
+                            %                     ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/SpkRespWin/foreps' ...
+                            %                     expt.name '_' stimcond(istim).wavnames '.fig']);
+                            %                 saveas(spkrespfig, ...
+                            %                     ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/SpkRespWin/foreps' ...
+                            %                     expt.name '_' stimcond(istim).wavnames '.tif']);
+                            close(spkrespfig)
+                        end
+                    end
                 end
-                respfig = figure;
-                hold on
-                scaleticks = 1;
-                ydatabound = [min(mean(input_struct.sigdata_filt(:,basetimes(1):end))), max(mean(input_struct.sigdata_filt(:,basetimes(1):end)))];
-                xtime=[1:size(input_struct.sigdata_filt,2)]*expt.wc.dt;
-                line(xtime,mean(input_struct.sigdata_filt),'color','k','LineWidth',3);
-                plot([xtime(1),xtime(end)],[response_vm_confint{sigind}(2),response_vm_confint{sigind}(2)],'--','color','k')
-                plot([xtime(1),xtime(end)],[response_vm_confint{sigind}(1),response_vm_confint{sigind}(1)],'--','color','k')
-                SigTimeBox(gca, (sigon)*expt.wc.dt,sigoff*expt.wc.dt, get(gca,'YLim'),[0.5 0.5 0.5]);
-                for iresp=1:size(up_win{sigind},2)
-                    SigTimeBox(gca, up_win{sigind}(1,iresp)*expt.wc.dt, ...
-                        up_win{sigind}(2,iresp)*expt.wc.dt, get(gca,'YLim'),'r');
-                end
-                for inhib=1:size(low_win{sigind},2)
-                    SigTimeBox(gca, low_win{sigind}(1,inhib)*expt.wc.dt, ...
-                        low_win{sigind}(2,inhib)*expt.wc.dt, get(gca,'YLim'),'b');
-                end
-                axis tight
-                Vrest{sigind} = mean(min(input_struct.sigdata_filt(:,basetimes(1):basetimes(2))'));
-                ylims = [Vrest{sigind},ydatabound(2)];
-                xlims = get(gca,'XLim');
-                xlims = [basetimes(1)*expt.wc.dt,xlims(2)];
-                set(gca,'XLim',xlims);
-                
-                set(gca,'YLim',ylims,'YTick',...
-                    [(floor(Vrest{sigind})-mod(floor(Vrest{sigind}),5)):5:(ceil(ymax)+mod(ceil(ymax),5))],...
-                    'XTick',[0:1:floor(xtime(end))],'TickDir','out')
-                text(xtime(1,basetimes(1)),round(Vrest{sigind}),[num2str(round(Vrest{sigind})) 'mV'],...
-                    'HorizontalAlignment','center',	'BackgroundColor', 'k',...
-                    'color',[1,1,1]);
-                box off
-                set(respfig,'Position',[212         523        1168         283])
-                title([expt.name stimcond(istim).wavnames],'Interpreter','none')
-                
-                saveas(respfig, ...
-                    ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/VmRespWin/' ...
-                    expt.name '_' stimcond(istim).wavnames '.fig']);
-                saveas(respfig, ...
-                    ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/VmRespWin/' ...
-                    expt.name '_' stimcond(istim).wavnames '.tif']);
-                close(respfig)
-                
-                respfig = figure;
-                hold on
-                scaleticks = 1;
-                ydatabound = [min(mean(input_struct.sigdata_filt(:,basetimes(1):end))), max(mean(input_struct.sigdata_filt(:,basetimes(1):end)))];
-                xtime=[1:size(input_struct.sigdata_filt,2)]*expt.wc.dt;
-                line(xtime,mean(input_struct.sigdata_filt),'color','k','LineWidth',3);
-                plot([xtime(1),xtime(end)],[response_vm_confint{sigind}(2),response_vm_confint{sigind}(2)],'--','color','k')
-                plot([xtime(1),xtime(end)],[response_vm_confint{sigind}(1),response_vm_confint{sigind}(1)],'--','color','k')
-                line([ (sigon)*expt.wc.dt,sigoff*expt.wc.dt], [ydatabound(1)-1, ydatabound(1)-1],...
-                    'color','k','LineWidth',3);
-                for iresp=1:size(up_win{sigind},2)
-                    line([up_win{sigind}(1,iresp)*expt.wc.dt, ...
-                        up_win{sigind}(2,iresp)*expt.wc.dt],[ydatabound(1)-1.2, ydatabound(1)-1.2],...
-                        'color' ,'r','LineWidth',0.5);
-                end
-                for inhib=1:size(low_win{sigind},2)
-                    line([low_win{sigind}(1,inhib)*expt.wc.dt, ...
-                        low_win{sigind}(2,inhib)*expt.wc.dt],[ydatabound(1)-1.4, ydatabound(1)-1.4],...
-                        'color' ,'b','LineWidth',0.5);
+                if isempty(gausstosmooth) %if there were not enough spikes, then there are no spike response windows
+                    up_win_spk = [];
+                    low_win_spk = [];
+                    SpkRespWin_up{unqind,sigind} = up_win_spk;
+                    SpkRespWin_low{unqind,sigind} = low_win_spk;
                 end
                 
-                axis tight
-                Vrest{sigind} = mean(min(input_struct.sigdata_filt(:,basetimes(1):basetimes(2))'));
-                ylims = [ydatabound(1)-2,ydatabound(2)];
-                xlims = get(gca,'XLim');
-                xlims = [basetimes(1)*expt.wc.dt,xlims(2)];
-                set(gca,'XLim',xlims);
-                
-                set(gca,'YLim',ylims,'YTick',...
-                    [(floor(Vrest{sigind})-mod(floor(Vrest{sigind}),5)):5:(ceil(ymax)+mod(ceil(ymax),5))],...
-                    'XTick',[0:1:floor(xtime(end))],'TickDir','out')
-                text(xtime(1,basetimes(1)),round(Vrest{sigind}),[num2str(round(Vrest{sigind})) 'mV'],...
-                    'HorizontalAlignment','center',	'BackgroundColor', 'k',...
-                    'color',[1,1,1]);
-                box off
-                                set(respfig,'Position',[212         523        1168         283])
+                %
+                cutdata = [];
+                vthresh_sig = [];
+                spkind = 1;
+                for itrial=1:size(spikesmat,1)
+                    spks_trial = spiketimes{itrial};
+                    thistrial = sigdata(itrial,:);
+                    for ispike = 1:size(spks_trial,2)
+                        t1 = spks_trial(ispike);
+                        
+                        spkwin_size = round((20/1000/dt)/2);
+                        if ispike == 1
+                            altbegin = [(t1 - spkwin_size),1];
+                        else altbegin = [(t1 - spkwin_size),1,spks_trial(ispike-1)+10];
+                        end
+                        
+                        if ispike == size(spks_trial,2);
+                            altend = [(t1 + spkwin_size),size(highpassdata,2),];
+                        else altend = [(t1 + spkwin_size),size(highpassdata,2),spks_trial(ispike+1)];
+                        end
+                        
+                        spk_win = [max(altbegin),min(altend)];
+                        
+                        tmpshape = thistrial(spk_win(1):spk_win(2));
+                        spkt = t1-spk_win(1);
+                        peakt = min(find(tmpshape==max(tmpshape(spkt-10:spkt+20))));
+                        dvdt = diff(tmpshape(1:peakt));
+                        dvdt_max = max(dvdt(1,end-10:end));
+                        peakind = max(find(dvdt == dvdt_max));
+                        %         dvdt_thr = 0.033 * dvdt_max;
+                        dvdt_thr = 0.1 * dvdt_max;
+                        
+                        spk_init = max(find(dvdt(1:peakind)<=dvdt_thr));
+                        
+                        if isempty(spk_init)
+                            continue
+                        end
+                        
+                        vthresh_sig(spkind) = tmpshape(spk_init);
+                        spk_end = min(find(tmpshape(peakt:end)<...
+                            tmpshape(spk_init)))+peakt-1;
+                        %if no value less than spk_init in that window)
+                        if isempty(spk_end)
+                            spk_end = min(find(tmpshape(peakt:end) == ...
+                                min(tmpshape(peakt:end)))) + peakt-1;
+                        end
+                        
+                        x = [spk_init,spk_end];
+                        xi = [spk_init:1:spk_end];
+                        y = [tmpshape(spk_init),tmpshape(spk_end)];
+                        yi = interp1(x,y,xi);
+                        
+                        cutshape = [tmpshape(1:spk_init-1),yi,tmpshape((spk_end+1):end)];
+                        
+                        startcut = spk_init + spk_win(1) -2;
+                        stopcut = spk_end + spk_win(1);
+                        thistrial = [thistrial(1:startcut),yi,sigdata(itrial,stopcut:end)];
+                        
+                        spkind = spkind + 1;
+                    end
+                    cutdata(itrial,:) = thistrial;
+                end
+                    Vthresh{unqind,sigind} = vthresh_sig;
+                    
+                    
+                    % get vm response windows
+                    
+                    out_struct = MetaResponseAnal_VmResponseWin(expt,input_struct);
+                    allfields = fieldnames(out_struct);
+                    for ifield = 1:size(allfields,1)
+                        s = [allfields{ifield} '{sigind} = out_struct.' allfields{ifield} ';'];
+                        eval(s)
+                    end
+                    
+                    Vrest{sigind} = mean(min(input_struct.sigdata_filt(:,basetimes(1):basetimes(2))'));
+                    
+                    VmBaseConf{unqind,sigind} = response_vm_confint{sigind};
+                    BaseVmVar{unqind,sigind} = spont_var{sigind};
+                    VrestCell{unqind,sigind} = Vrest{sigind};
+                    SubRespWin_up{unqind,sigind} = up_win{sigind};
+                    SubRespWin_low{unqind,sigind} = low_win{sigind};
+                    VmRespVec_up{unqind,sigind} = allVmRespVec_up{sigind};
+                    VmRespVec_low{unqind,sigind} = allVmRespVec_low{sigind};
+                    VmRespMean_up{unqind,sigind} = vm_mean_up{sigind};
+                    VmRespVar_up{unqind,sigind} = vm_var_up{sigind};
+                    VmRespMean_low{unqind,sigind} = vm_mean_low{sigind};
+                    VmRespVar_low{unqind,sigind} = vm_var_low{sigind};
+                    VmNotVec{unqind,sigind} = allVmNotVec{sigind};
+                    VmNotVar{unqind,sigind} = allVmNotVar{sigind};
+                    
+                    if doplot ==1
+                        
+                        respfig = figure;
+                        hold on
+                        scaleticks = 1;
+                        ydatabound = [min(mean(input_struct.sigdata_filt(:,basetimes(1):end))), max(mean(input_struct.sigdata_filt(:,basetimes(1):end)))];
+                        xtime=[1:size(input_struct.sigdata_filt,2)]*expt.wc.dt;
+                        line(xtime,mean(input_struct.sigdata_filt),'color','k','LineWidth',3);
+                        plot([xtime(1),xtime(end)],[response_vm_confint{sigind}(2),response_vm_confint{sigind}(2)],'--','color','k')
+                        plot([xtime(1),xtime(end)],[response_vm_confint{sigind}(1),response_vm_confint{sigind}(1)],'--','color','k')
+                        SigTimeBox(gca, (sigon)*expt.wc.dt,sigoff*expt.wc.dt, get(gca,'YLim'),[0.5 0.5 0.5]);
+                        for iresp=1:size(up_win{sigind},2)
+                            SigTimeBox(gca, up_win{sigind}(1,iresp)*expt.wc.dt, ...
+                                up_win{sigind}(2,iresp)*expt.wc.dt, get(gca,'YLim'),'r');
+                        end
+                        for inhib=1:size(low_win{sigind},2)
+                            SigTimeBox(gca, low_win{sigind}(1,inhib)*expt.wc.dt, ...
+                                low_win{sigind}(2,inhib)*expt.wc.dt, get(gca,'YLim'),'b');
+                        end
+                        axis tight
+                        ylims = [Vrest{sigind},ydatabound(2)];
+                        xlims = get(gca,'XLim');
+                        xlims = [basetimes(1)*expt.wc.dt,xlims(2)];
+                        set(gca,'XLim',xlims);
+                        
+                        set(gca,'YLim',ylims,'YTick',...
+                            [(floor(Vrest{sigind})-mod(floor(Vrest{sigind}),5)):5:(ceil(ymax)+mod(ceil(ymax),5))],...
+                            'XTick',[0:1:floor(xtime(end))],'TickDir','out')
+                        text(xtime(1,basetimes(1)),round(Vrest{sigind}),[num2str(round(Vrest{sigind})) 'mV'],...
+                            'HorizontalAlignment','center',	'BackgroundColor', 'k',...
+                            'color',[1,1,1]);
+                        box off
+                        set(respfig,'Position',[212         523        1168         283])
+                        title([expt.name stimcond(istim).wavnames],'Interpreter','none')
+                        
+                        %                 saveas(respfig, ...
+                        %                     ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/VmRespWin/' ...
+                        %                     expt.name '_' stimcond(istim).wavnames '.fig']);
+                        %                 saveas(respfig, ...
+                        %                     ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/VmRespWin/' ...
+                        %                     expt.name '_' stimcond(istim).wavnames '.tif']);
+                        close(respfig)
+                        if doforEPS == 1;
+                            respfig = figure;
+                            hold on
+                            scaleticks = 1;
+                            ydatabound = [min(mean(input_struct.sigdata_filt(:,basetimes(1):end))), max(mean(input_struct.sigdata_filt(:,basetimes(1):end)))];
+                            xtime=[1:size(input_struct.sigdata_filt,2)]*expt.wc.dt;
+                            line(xtime,mean(input_struct.sigdata_filt),'color','k','LineWidth',3);
+                            plot([xtime(1),xtime(end)],[response_vm_confint{sigind}(2),response_vm_confint{sigind}(2)],'--','color','k')
+                            plot([xtime(1),xtime(end)],[response_vm_confint{sigind}(1),response_vm_confint{sigind}(1)],'--','color','k')
+                            line([ (sigon)*expt.wc.dt,sigoff*expt.wc.dt], [ydatabound(1)-1, ydatabound(1)-1],...
+                                'color','k','LineWidth',3);
+                            for iresp=1:size(up_win{sigind},2)
+                                line([up_win{sigind}(1,iresp)*expt.wc.dt, ...
+                                    up_win{sigind}(2,iresp)*expt.wc.dt],[ydatabound(1)-1.2, ydatabound(1)-1.2],...
+                                    'color' ,'r','LineWidth',0.5);
+                            end
+                            for inhib=1:size(low_win{sigind},2)
+                                line([low_win{sigind}(1,inhib)*expt.wc.dt, ...
+                                    low_win{sigind}(2,inhib)*expt.wc.dt],[ydatabound(1)-1.4, ydatabound(1)-1.4],...
+                                    'color' ,'b','LineWidth',0.5);
+                            end
+                            
+                            axis tight
+                            Vrest{sigind} = mean(min(input_struct.sigdata_filt(:,basetimes(1):basetimes(2))'));
+                            ylims = [ydatabound(1)-2,ydatabound(2)];
+                            xlims = get(gca,'XLim');
+                            xlims = [basetimes(1)*expt.wc.dt,xlims(2)];
+                            set(gca,'XLim',xlims);
+                            
+                            set(gca,'YLim',ylims,'YTick',...
+                                [(floor(Vrest{sigind})-mod(floor(Vrest{sigind}),5)):5:(ceil(ymax)+mod(ceil(ymax),5))],...
+                                'XTick',[0:1:floor(xtime(end))],'TickDir','out')
+                            text(xtime(1,basetimes(1)),round(Vrest{sigind}),[num2str(round(Vrest{sigind})) 'mV'],...
+                                'HorizontalAlignment','center',	'BackgroundColor', 'k',...
+                                'color',[1,1,1]);
+                            box off
+                            set(respfig,'Position',[212         523        1168         283])
+                            
+                            title([expt.name stimcond(istim).wavnames],'Interpreter','none')
+                            %
+                            %                 saveas(respfig, ...
+                            %                     ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/VmRespWin/foreps_' ...
+                            %                     expt.name '_' stimcond(istim).wavnames '.fig']);
+                            %                 saveas(respfig, ...
+                            %                     ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/VmRespWin/foreps_' ...
+                            %                     expt.name '_' stimcond(istim).wavnames '.tif']);
+                            close(respfig)
+                        end
+                    end
+                    sigind = sigind + 1;
+                end
+            end
+        end
+        
+        %summary data for each expt (cell/signal block)
+        %VmVector of all Vm values during responses (up or down)
+        
+        
+        
+        unqind = unqind+1;
+        
+    
+end
+%% get statts from Vm and spiking response window structs on response duration and magnitude
+% Vthresh
+% SpkRespWin_up
+% SpkRespWin_low
+% SpkRespRate_up
+% SpkRespRate_low
+% SpkRespRate_not
+% VmBaseConf
+% VrestCell
+% SubRespWin_up
+% SubRespWin_low
+% VmRespVec_up
+% VmRespVec_low
+% siglen
+% signame
+% VmRespMean_up
+% VmRespVar_up
+% VmRespMean_low
+% VmRespVar_low
+% VmNotVec
+% VmNotVar
+% BaseVmVar
 
-                title([expt.name stimcond(istim).wavnames],'Interpreter','none')
-                
-                saveas(respfig, ...
-                    ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/VmRespWin/foreps_' ...
-                    expt.name '_' stimcond(istim).wavnames '.fig']);
-                saveas(respfig, ...
-                    ['/Users/kperks/GitHub/Data_Mat/Analysis/Meta_Responses_DB/VmRespWin/foreps_' ...
-                    expt.name '_' stimcond(istim).wavnames '.tif']);
-                close(respfig)
-                
-                
-                sigind = sigind + 1;
+%distribution of response epoch durations
+%mean across all epochs across all cells, not mean of mean per cell
+
+%%%%%%%%%%%%%%% response increases
+vm_alluplen = [];
+sp_alluplen = [];
+flagSpkResp = [];
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});   
+            vm_alluplen = [vm_alluplen, diff(SubRespWin_up{iunq,isig})];
+            sp_alluplen = [sp_alluplen, diff(SpkRespWin_up{iunq,isig})];
+            if ~isempty(find(diff(SpkRespWin_up{iunq,isig})*expt.wc.dt>3))
+                flagSpkResp(iunq,isig) = 1;
             end
         end
     end
-    
-    %summary data for each expt (cell/signal block)
-    %VmVector of all Vm values during responses (up or down)
-    tmpvm_up = [];
-    tmpvm_low = [];
-    tmpconfint = [];
-    tmpvrest = [];
-    
-      for isig = 1:size(Vrest,2)
-        tmpvrest = [tmpvrest; Vrest{isig}];
+end
+sp_meduplen = median(sp_alluplen) * expt.wc.dt
+sp_ci = getCDFconf(sp_alluplen*expt.wc.dt,95)
+vm_meduplen = median(vm_alluplen) * expt.wc.dt
+vm_ci = getCDFconf(vm_alluplen*expt.wc.dt,95)
+figure; hold on
+[x,p] = empcdf(vm_alluplen* expt.wc.dt);
+stairs(x,p,'color','r')
+[x,p] = empcdf(sp_alluplen* expt.wc.dt);
+stairs(x,p,'color','k')
+legend({'vm "up" epoch durations', 'spk "up" epoch durations'})
+xlabel('seconds')
+
+%percent of the stimulus that is facilatory responses
+vm_percent_up = [];
+sp_percent_up = [];
+flagSpkResp = [];
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});   
+            vm_percent_up = [vm_percent_up, sum(diff(SubRespWin_up{iunq,isig}))/siglen{iunq,isig}];
+            sp_percent_up = [sp_percent_up, sum(diff(SpkRespWin_up{iunq,isig}))/siglen{iunq,isig}];
+        end
     end
+end
+sp_medpercup = median(sp_percent_up) * 100
+sp_ci = getCDFconf(sp_percent_up*100,95)
+vm_medpercup = median(vm_percent_up) * 100
+vm_ci = getCDFconf(vm_percent_up*100,95)
+[h,p] = kstest2(vm_percent_up,sp_percent_up)
+numberstim = size(sp_percent_up)
+numberstim = size(vm_percent_up)
+
+%percent of the stimulus that is suppressive responses
+vm_percent_dn = [];
+sp_percent_dn = [];
+flagSpkResp = [];
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});   
+            vm_percent_dn = [vm_percent_dn, sum(diff(SubRespWin_low{iunq,isig}))/siglen{iunq,isig}];
+            sp_percent_dn = [sp_percent_dn, sum(diff(SpkRespWin_low{iunq,isig}))/siglen{iunq,isig}];
+        end
+    end
+end
+sp_medpercdn = median(sp_percent_dn) * 100
+sp_ci = getCDFconf(sp_percent_dn*100,95)
+vm_medpercdn = median(vm_percent_dn) * 100
+vm_ci = getCDFconf(vm_percent_dn*100,95)
+[h,p] = kstest2(vm_percent_dn,sp_percent_dn)
+numberstim = size(sp_percent_dn)
+numberstim = size(vm_percent_dn)
+
+%percent of the stimulus that is not driving subthreshold responses
+vm_percent_not = [];
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});   
+            vm_percent_not = [vm_percent_not, size(VmNotVec{iunq,isig},2)/siglen{iunq,isig}];
+        end
+    end
+end
+vm_medpercnot = median(vm_percent_not) * 100
+vm_ci = getCDFconf(vm_percent_not*100,95)
+numberstim = size(vm_percent_not)
+
+
+
+% distribution of facilatory response magnitudes
+%mean across all epochs across all cells, not mean of mean per cell
+vm_allupmag = [];
+sp_allupmag = [];
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});   
+            vm_allupmag = [vm_allupmag, (VmRespMean_up{iunq,isig})-VrestCell{iunq,isig}];
+            sp_allupmag = [sp_allupmag, (SpkRespRate_up{iunq,isig})];
+        end
+    end
+end
+sp_medupmag = median(sp_allupmag) 
+sp_ci = getCDFconf(sp_allupmag,95)
+vm_medupmag = median(vm_allupmag) 
+vm_ci = getCDFconf(vm_allupmag,95)
+figure; hold on
+[x,p] = empcdf(vm_allupmag); 
+stairs(x,p,'color','r')
+[x,p] = empcdf(sp_allupmag);
+stairs(x,p,'color','k')
+legend({'vm "up" mean resp mV', 'spk "up" mean resp spk/sec'})
+
+%%%%%%%%%%% response decreases
+vm_alldnlen = [];
+sp_alldnlen = [];
+flagSpkResp = [];
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});   
+            vm_alldnlen = [vm_alldnlen, diff(SubRespWin_low{iunq,isig})];
+            sp_alldnlen = [sp_alldnlen, diff(SpkRespWin_low{iunq,isig})];
+            if ~isempty(find(diff(SpkRespWin_up{iunq,isig})*expt.wc.dt>3))
+                flagSpkResp(iunq,isig) = 1;
+            end
+        end
+    end
+end
+sp_meddnlen = median(sp_alldnlen) * expt.wc.dt
+sp_ci = getCDFconf(sp_alldnlen*expt.wc.dt,95)
+vm_meddnlen = median(vm_alldnlen) * expt.wc.dt
+vm_ci = getCDFconf(vm_alldnlen*expt.wc.dt,95)
+figure; hold on
+[x,p] = empcdf(vm_alldnlen* expt.wc.dt);
+stairs(x,p,'color','r')
+[x,p] = empcdf(sp_alldnlen* expt.wc.dt);
+stairs(x,p,'color','k')
+legend({'vm "low" epoch durations', 'spk "low" epoch durations'})
+xlabel('seconds')
+
+% distribution of response magnitudes
+%mean across all epochs across all cells, not mean of mean per cell
+vm_alldnmag = [];
+sp_alldnmag = [];
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});   
+            vm_alldnmag = [vm_alldnmag, (VmRespMean_low{iunq,isig})-VrestCell{iunq,isig}];
+            sp_alldnmag = [sp_alldnmag, (SpkRespRate_low{iunq,isig})];
+        end
+    end
+end
+sp_meddnmag = median(sp_alldnmag) 
+sp_ci = getCDFconf(sp_alldnmag,95)
+vm_meddnmag = median(vm_alldnmag) 
+vm_ci = getCDFconf(vm_alldnmag,95)
+figure; hold on
+[x,p] = empcdf(vm_alldnmag); 
+stairs(x,p,'color','r')
+[x,p] = empcdf(sp_alldnmag);
+stairs(x,p,'color','k')
+legend({'vm "low" mean resp mV', 'spk "low" mean resp spk/sec'})
+
+
+
+%%
+allspkthresh = [];
+for iunq = 1:size(signame,1)
+    x_depol = [];
+    y_var = [];
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig})
+            if ~isempty(Vthresh{iunq,isig})
+                allspkthresh = [allspkthresh,-VrestCell{iunq,isig} + Vthresh{iunq,isig}];
+            end
+        end
+    end
+end
+%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%
+%%%%%%%%%%%% group of anal for covariance of variance and repsonse
+%%%%%%%%%%%% magnitude
+% vm_allupmag = [];
+% vm_allupdepol = [];
+% vm_allupvar = [];
+figure;hold on
+
+rsq = [];
+rmse = [];
+scale = [];
+all_depol = [];
+
+% sp_allupmag = [];  %%%%%need to do calc of spiking responses in previous script above
+for iunq = 1:size(signame,1)
+    x_depol = [];
+    y_var = [];
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});
+            if ~isempty(VmRespMean_up{iunq,isig})
+                %         vm_allupmag = [vm_allupmag, VmRespMean_up{iunq,isig}];
+                %         vm_allupdepol = [vm_allupdepol, repmat(-VrestCell{iunq,isig},1,size(VmRespMean_up{iunq,isig},2)) ...
+                %             + VmRespMean_up{iunq,isig}];
+                %         vm_allupvar = [vm_allupvar, VmRespVar_up{iunq,isig}];
+                x_depol = [x_depol,(repmat(-VrestCell{iunq,isig},1,size(VmRespMean_up{iunq,isig},2)) ...
+                    + VmRespMean_up{iunq,isig})];
+                all_depol = [all_depol, (repmat(-VrestCell{iunq,isig},1,size(VmRespMean_up{iunq,isig},2)) ...
+                    + VmRespMean_up{iunq,isig})];
+                y_var = [y_var,(VmRespVar_up{iunq,isig}./BaseVmVar{iunq,isig})];
+                
+            end
+        end
+    end
+    up_vm_var(iunq) = mean(y_var);
+    
+    scatter(x_depol,y_var)
+    
+    cf = fit(x_depol',y_var','poly1');
+    % fitline = cf.p1*dnsampRMS + cf.p2;
+    fitline = cf.p1*x_depol + cf.p2;
+    line(x_depol,fitline,'color','r')
+    scale(iunq) = cf.p1;
+    [rsq(iunq) rmse(iunq)] = rsquare(y_var,fitline);    
+end
+set(gca,'FontSize',16)
+title(' "depolarizing" responses')
+ylabel('proportion spontaneous variance')
+xlabel('mean response magnitude (mV above Vrest)')
+% vm_medupmag = median(vm_allupmag)
+% vm_ci = getCDFconf(vm_allupmag,95)
+% figure; hold on
+% [x,p] = empcdf(vm_allupmag);
+% stairs(x,p,'color','r')
+% vm_medupdepol = median(vm_allupdepol)
+% vm_ci = getCDFconf(vm_allupdepol,95)
+% figure;
+% scatter(vm_allupdepol,vm_allupvar)
+figure;hold on
+   
+    rsq = nan(size(signame,1),size(signame,2));
+    rmse = nan(size(signame,1),size(signame,2));
+    scale = nan(size(signame,1),size(signame,2));
+    all_hyper = [];
+% sp_allupmag = [];  %%%%%need to do calc of spiking responses in previous script above
+for iunq = 1:size(signame,1)
+ x_depol = [];
+    y_var = [];
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});
+            if ~isempty(VmRespMean_low{iunq,isig})
+                if (VmRespMean_low{iunq,isig}) ~= 0
+                %         vm_allupmag = [vm_allupmag, VmRespMean_up{iunq,isig}];
+                %         vm_allupdepol = [vm_allupdepol, repmat(-VrestCell{iunq,isig},1,size(VmRespMean_up{iunq,isig},2)) ...
+                %             + VmRespMean_up{iunq,isig}];
+                %         vm_allupvar = [vm_allupvar, VmRespVar_up{iunq,isig}];
+                x_depol = [x_depol,(repmat(-VrestCell{iunq,isig},1,size(VmRespMean_low{iunq,isig},2)) ...
+                    + VmRespMean_low{iunq,isig})];
+                all_hyper = [all_hyper,(repmat(-VrestCell{iunq,isig},1,size(VmRespMean_low{iunq,isig},2)) ...
+                    + VmRespMean_low{iunq,isig})];
+                y_var = [y_var,(VmRespVar_low{iunq,isig}./BaseVmVar{iunq,isig})];
+                end
+            end
+        end
+    end
+    low_vm_var(iunq) = mean(y_var);
+    
+    if size(x_depol,2) > 1
+    scatter(x_depol,y_var)
+
+        cf = fit(x_depol',y_var','poly1');
+        % fitline = cf.p1*dnsampRMS + cf.p2;
+        fitline = cf.p1*x_depol + cf.p2;
+        line(x_depol,fitline,'color','r')
+        scale(iunq) = cf.p1;
+        [rsq(iunq) rmse(iunq)] = rsquare(y_var,fitline);
+    end
+   
+end
+set(gca,'FontSize',16)
+title(' "hyperpolarizing" responses')
+ylabel('proportion spontaneous variance')
+xlabel('mean response magnitude (mV above Vrest)')
+
+figure;hold on
+rsq = nan(1,size(signame,1));
+rmse = nan(1,size(signame,1));
+scale = nan(1,size(signame,1));
+all_not = [];
+% sp_allupmag = [];  %%%%%need to do calc of spiking responses in previous script above
+for iunq = 1:size(signame,1)
+    x_depol = [];
+    y_var = [];
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});
+            if ~isempty(VmNotVar{iunq,isig})
+                %         vm_allupmag = [vm_allupmag, VmRespMean_up{iunq,isig}];
+                %         vm_allupdepol = [vm_allupdepol, repmat(-VrestCell{iunq,isig},1,size(VmRespMean_up{iunq,isig},2)) ...
+                %             + VmRespMean_up{iunq,isig}];
+                %         vm_allupvar = [vm_allupvar, VmRespVar_up{iunq,isig}];
+                x_depol = [x_depol,(-VrestCell{iunq,isig} ...
+                    + mean(VmNotVec{iunq,isig}))];
+                all_not = [all_not,(-VrestCell{iunq,isig} ...
+                    + mean(VmNotVec{iunq,isig}))];
+                y_var = [y_var,(mean(VmNotVar{iunq,isig})./BaseVmVar{iunq,isig})];
+                
+            end
+        end
+    end
+    not_vm_var(iunq) = mean(y_var);
+    
+    if size(x_depol,2) > 1
+        scatter(x_depol,y_var)
         
-    for isig = 1:size(allVmRespVec_up,2)
-        tmpvm_up = [tmpvm_up, allVmRespVec_up{isig}];
+        cf = fit(x_depol',y_var','poly1');
+        % fitline = cf.p1*dnsampRMS + cf.p2;
+        fitline = cf.p1*x_depol + cf.p2;
+        line(x_depol,fitline,'color','r')
+        scale(iunq) = cf.p1;
+        [rsq(iunq) rmse(iunq)] = rsquare(y_var,fitline);
     end
-    for isig = 1:size(allVmRespVec_low,2)
-          tmpvm_low = [tmpvm_low, allVmRespVec_low{isig}];
+end
+set(gca,'FontSize',16)
+title(' "not" responses')
+ylabel('proportion spontaneous variance')
+xlabel('mean response magnitude (mV above Vrest)')
+
+
+vm_notvar = [];
+vm_notdepol = [];
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});   
+            if ~isempty(VmNotVec{iunq,isig})
+        vm_notdepol = [vm_notdepol, -VrestCell{iunq,isig}...
+            + median(VmNotVec{iunq,isig})];
+        vm_notvar = [vm_notvar, median(VmNotVar{iunq,isig})];
+            end
+        end
     end
-    for isig = 1:size(response_vm_confint,2)
-        tmpconfint = [tmpconfint; response_vm_confint{isig}];
+end
+vm_mednotdepol = median(vm_notdepol)
+vm_ci = getCDFconf(vm_notdepol,95)
+figure;
+scatter(vm_notdepol,vm_notvar)
+ylabel('var of not repsonses')
+xlabel('vm of not responses')
+
+
+figure; hold on
+scatter(repmat(1,1,size(low_vm_var,2)),low_vm_var)
+scatter(repmat(2,1,size(not_vm_var,2)),not_vm_var)
+scatter(repmat(3,1,size(up_vm_var,2)),up_vm_var)
+plot([0,4],[1,1],'--k')
+set(gca,'XTick',[1:3],'XTickLabel',{'hyper','spont','depol'},...
+    'XLim',[0.5,3.5],'FontSize',16)
+ylabel('proportion spontaneous variance')
+
+figure; hold on
+edges = [-50:2:50];
+x_depol = histc(all_depol,edges)/size(all_depol,2)*100;
+x_hyper = histc(all_hyper,edges)/size(all_hyper,2)*100;
+x_not = histc(all_not,edges)/size(all_not,2)*100;
+x_spk = histc(allspkthresh,edges)/size(allspkthresh,2)*100;
+spkbins = find(x_spk>0.1);
+bar(edges(1,spkbins)+1,x_depol(1,spkbins),'y','BarWidth',1)
+stairs(edges,x_depol,'color','r','LineWidth',3)
+stairs(edges,x_hyper,'color','b','LineWidth',3)
+stairs(edges,x_not,'color','k','LineWidth',3)
+ stairs(edges,x_spk,'color',[0.5 0.5 0.5],'LineWidth',3)
+set(gca,'XLim',[-5,40],'YLim',[0,100],'FontSize',16)
+legend({[num2str(sum(x_depol(1,spkbins))) '% overlap'],'depol','hyper','not','Vthresh'})
+xlabel('mean magnitude of response (mV above Vrest)')
+ylabel('proportion total responses')
+
+depolVmOverlapSpk = sum(x_depol(1,spkbins))
+CI_97_spkTHresh = getCDFconf(allspkthresh,97)
+
+
+%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%
+%%%%%%%%%%% end of this group of anal
+%%
+
+vm_all_lowmag = [];
+vm_all_lowdepol = [];
+vm_all_lowvar = [];
+figure;hold on
+% sp_allupmag = [];  %%%%%need to do calc of spiking responses in previous script above
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});   
+            if ~isempty(VmRespMean_low{iunq,isig})
+        vm_all_lowmag = [vm_all_lowmag, VmRespMean_low{iunq,isig}];
+        vm_all_lowdepol = [vm_all_lowdepol, repmat(-VrestCell{iunq,isig},1,size(VmRespMean_low{iunq,isig},2)) ...
+            + VmRespMean_low{iunq,isig}];
+        vm_all_lowvar = [vm_all_lowvar, VmRespVar_low{iunq,isig}];
+        scatter(VmRespMean_low{iunq,isig},repmat(-VrestCell{iunq,isig},1,size(VmRespMean_low{iunq,isig},2)) ...
+            + VmRespMean_low{iunq,isig})
+            end
+        end
     end
-    VmRespVec_up{iunq} = tmpvm_up;
-    VmRespVec_low{iunq} = tmpvm_low;
-    VmBaseConf{iunq} = tmpconfint;
-    VmAllLen(iunq) = siglen;
-    VrestCell{iunq} = tmpvrest;
-    
+end
+vm_medlowmag = median(vm_all_lowmag) 
+vm_ci = getCDFconf(vm_all_lowmag,95)
+figure; hold on
+[x,p] = empcdf(vm_all_lowmag);
+stairs(x,p,'color','r')
+vm_medlowdepol = median(vm_all_lowdepol)
+vm_ci = getCDFconf(vm_all_lowdepol,95)
+figure;
+scatter(vm_all_lowdepol,vm_all_lowvar)
+
+
+vm_up = nan(size(signame,1),size(signame,2));
+vm_low = nan(size(signame,1),size(signame,2));
+vm_not = nan(size(signame,1),size(signame,2));
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});
+            
+        vm_up(iunq,isig) = sum(diff(SubRespWin_up{iunq,isig})) ./ siglen{iunq,isig};
+          
+        vm_low(iunq,isig) = sum(diff(SubRespWin_low{iunq,isig})) ./ siglen{iunq,isig};
+       
+        vm_not(iunq,isig) = (siglen{iunq,isig} - ...
+            sum([sum(diff(SubRespWin_up{iunq,isig})),sum(diff(SubRespWin_low{iunq,isig}))]))...
+            ./siglen{iunq,isig};
+        end
+    end
+end
+
+sp_up = nan(size(signame,1),size(signame,2));
+sp_low = nan(size(signame,1),size(signame,2));
+sp_not = nan(size(signame,1),size(signame,2));
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});
+            
+        sp_up(iunq,isig) = sum(diff(SpkRespWin_up{iunq,isig})) ./ siglen{iunq,isig};
+          
+        sp_low(iunq,isig) = sum(diff(SpkRespWin_low{iunq,isig})) ./ siglen{iunq,isig};
+       
+        sp_not(iunq,isig) = (siglen{iunq,isig} - ...
+            sum([sum(diff(SpkRespWin_up{iunq,isig})),sum(diff(SpkRespWin_low{iunq,isig}))]))...
+            ./siglen{iunq,isig};
+        end
+    end
+end
+
+
+med_vmup = mean(nanmean(vm_up'))
+vmup_ci = getCDFconf(nanmean(vm_up'),95)
+[signif_diff, p] = kstest2(nanmean(vm_up'),nanmean(sp_up'))
+med_spup = mean(nanmean(sp_up'))
+spup_ci = getCDFconf(nanmean(sp_up'),95)
+
+med_vmlow = mean(nanmean(vm_low'))
+vmlow_ci = getCDFconf(nanmean(vm_low'),95)
+med_vmnot = mean(nanmean(vm_not'))
+vmnot_ci = getCDFconf(nanmean(vm_not'),95)
+
+med_splow = mean(nanmean(sp_low'))
+splow_ci = getCDFconf(nanmean(sp_low'),95)
+
+figure; hold on
+set(gca,'XTick',[1:3]','XTickLabel',{'not','hyp','dep'},'YLim',[0,1],'XLim',[0.5,3.5])
+x = repmat([1:3]',1,20);
+y = [nanmean(vm_not'); nanmean(vm_low'); nanmean(vm_up')];
+scatter(x(:), y(:), 100,'r')
+scatter([1:3],[mean(nanmean(vm_not')), mean(nanmean(vm_low')), mean(nanmean(vm_up'))],200,'r','fill')
+y = [nanmean(sp_not'); nanmean(sp_low'); nanmean(sp_up')];
+scatter(x(:), y(:), 100,'k')
+scatter([1:3],[mean(nanmean(sp_not')), mean(nanmean(sp_low')), mean(nanmean(sp_up'))],200,'k','fill')
+
+figure; hold on
+set(gca,'XTick',[1:3]','XTickLabel',{'not','hyp','dep'},'YLim',[0,1],'XLim',[0.5,3.5])
+x = repmat([1:3]',1,20);
+y = [nanmean(vm_not'); nanmean(vm_low'); nanmean(vm_up')];
+scatter(x(:), y(:), 100,'r')
+scatter([1:3],[median(nanmean(vm_not')), median(nanmean(vm_low')), median(nanmean(vm_up'))],200,'r','fill')
+y = [nanmean(sp_not'); nanmean(sp_low'); nanmean(sp_up')];
+scatter(x(:), y(:), 100,'k')
+scatter([1:3],[median(nanmean(sp_not')), median(nanmean(sp_low')), median(nanmean(sp_up'))],200,'k','fill')
+
+diff_up = nan(size(signame,1),size(signame,2));
+diff_low = nan(size(signame,1),size(signame,2));
+diff_not = nan(size(signame,1),size(signame,2));
+diff_other = nan(size(signame,1),size(signame,2));
+figure; hold on
+for iunq = 1:size(signame,1)
+    for isig = 1:size(signame,2) %the array is size of max number stimuli... need to go through and ask if empty for each
+        if ~isempty(signame{iunq,isig});
+        
+            scatter((sum(diff(SpkRespWin_up{iunq,isig}))./siglen{iunq,isig}), ...
+                (sum(diff(SubRespWin_up{iunq,isig}))./siglen{iunq,isig}),100,'k')
+        end
+    end
+end
+set(gca,'YLim',[0,1],'XLim',[0,1])
+%%
+for iunq = 1:size(VmRespVec_up,2)
+    up_len(iunq) = size(VmRespVec_up{iunq},2);
+end
+for iunq = 1:size(VmRespVec_up,2)
+    low_len(iunq) = size(VmRespVec_low{iunq},2);
 end
 
 figure;
@@ -1550,7 +2474,7 @@ figure;
 hold on
 for iunq = 1:size(VmAllLen,2)
     [x,p]=empcdf(VmRespVec_up{iunq} - VmBaseConf(iunq,1));
-      stairs(x,p,'color','b')
+    stairs(x,p,'color','b')
 end
 
 figure;
@@ -1559,8 +2483,8 @@ for iunq = 1:size(VmAllLen,2)
     [x,p]=empcdf(VmRespVec_up{iunq});
     stairs(x,p,'color','r')
     [x,p]=empcdf(VmRespVec_low{iunq});
-     stairs(x,p,'color','b')
-     
+    stairs(x,p,'color','b')
+    
 end
 [x,p] = empcdf(unq_Vrest);
 stairs(x,p,'color','k')
@@ -1588,17 +2512,45 @@ stairs(VmEdges,n_spk,'color','k','LineWidth',4)
 title(['% of depol Vm response values overlapping with spike threshold range: ' ...
     num2str(round(sum(mean_vmhist_up(1,spkbins))*100))],'FontSize',14)
 
-
-% get propoertion of Vm that is counted as part of
-% depol response and proportion that is hyperpol response
-for iunq = 1:size(VmAllLen,2)
-    p_up(iunq) = size(VmRespVec_up{iunq},2)/VmAllLen(iunq);
-    p_low(iunq) = size(VmRespVec_low{iunq},2)/VmAllLen(iunq);
+upvm = [];
+lowvm = [];
+for iunq = 1:size(VmRespVec_up,2)
+upvm = [upvm, VmRespVec_up{iunq}];
+lowvm = [lowvm, VmRespVec_low{iunq}];
 end
-figure;
+
+figure
 hold on
-scatter(repmat(1,size(p_low,1),size(p_low,2)),p_low - p_up)
-% scatter(repmat(2,size(p_up,1),size(p_up,2)),p_up)
+lowp = 0.15;
+highp = 0.85;
+y = quantile(unq_Vrest,[0,1]);
+line([1,1],y,'color',[0.5 0.5 0.5],'LineWidth',2)
+y = quantile(unq_Vrest,[lowp,highp]);
+line([1,1],y,'color','k','LineWidth',4)
+scatter(1,median(unq_Vrest),200,'k','fill')
+
+y = quantile(lowvm,[0,1]);
+line([2,2],y,'color',[0.5 0.5 0.5],'LineWidth',2)
+y = quantile(lowvm,[lowp,highp]);
+line([2,2],y,'color','k','LineWidth',4)
+scatter(2,median(lowvm),200,'k','fill')
+
+y = quantile(upvm,[0,1]);
+line([3,3],y,'color',[0.5 0.5 0.5],'LineWidth',2)
+y = quantile(upvm,[lowp,highp]);
+line([3,3],y,'color','k','LineWidth',4)
+scatter(3,median(upvm),200,'k','fill')
+
+y = quantile(unq_initVm,[0,1]);
+line([4,4],y,'color',[0.5 0.5 0.5],'LineWidth',2)
+y = quantile(unq_initVm,[lowp,highp]);
+line([4,4],y,'color','k','LineWidth',4)
+scatter(4,median(unq_initVm),200,'k','fill')
+
+set(gca,'XTick',[1,2,3,4],'XTickLabel',{'Vrest','Vm inc','Vm dec','spike thresh'},...
+    'XLim',[0,5],'FontSize',14)
+ylabel('Vm')
+
 
 
 %%

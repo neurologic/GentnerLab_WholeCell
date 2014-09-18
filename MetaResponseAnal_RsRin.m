@@ -4,6 +4,12 @@ stepdur = round(0.25/expt.wc.dt);
 stepstart = 553;
 
 stepdata = mean(allstepdata,1);
+
+% get the sag ratio (min during first 120ms of step divided by last 20msec median)
+sagt = round(0.12/expt.wc.dt);
+steadyt = size(stepdata,2)-round(0.02/expt.wc.dt);
+out_struct.sagR = median(stepdata(steadyt:end))/min(stepdata(1:sagt));
+
 V_i = max(stepdata);
 stepdata=(stepdata- max(stepdata));
 rin_x = [0:size(stepdata,2)-1];
@@ -91,6 +97,7 @@ if rD >= rH
     line(xtimestep,rin_fitline+V_i,'color','g','LineWidth',2)
     line(xtimestep,rs_fitline+V_i,'color','r','LineWidth',2)
     line(xtimestep,fitlineD+V_i,'color','b','LineWidth',2)
+    line(xtimestep,(fitlineD+rs_fitline+rin_fitline)+V_i,'color',[0.5 0.5 0.5],'LineWidth',3)
 end
 
 if rH > rD
