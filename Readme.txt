@@ -1,1 +1,1 @@
-this repo is recognized, why isn't the other one?
+Scripts for managing experiment and analysis of whole cell recordings in gentner lab. Igor Pro
